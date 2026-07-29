@@ -1,0 +1,2 @@
+"""Small chess-agent playground."""
+
