@@ -2,7 +2,7 @@ import argparse
 
 import chess
 
-from chess_agent.agents import AlphaBetaAgent, RandomAgent
+from chess_agent.agents import AlphaBetaAgent, HumanAgent, RandomAgent
 from chess_agent.agents.base import Agent
 
 
@@ -11,13 +11,23 @@ def make_agent(kind: str, depth: int) -> Agent:
         return RandomAgent()
     if kind == "alpha":
         return AlphaBetaAgent(depth=depth)
+    if kind == "human":
+        return HumanAgent()
     raise ValueError(f"unknown agent: {kind}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--white", choices=["random", "alpha"], default="alpha")
-    parser.add_argument("--black", choices=["random", "alpha"], default="random")
+    parser.add_argument(
+        "--white",
+        choices=["random", "alpha", "human"],
+        default="alpha",
+    )
+    parser.add_argument(
+        "--black",
+        choices=["random", "alpha", "human"],
+        default="random",
+    )
     parser.add_argument("--depth", type=int, default=3)
     parser.add_argument("--fen", default=chess.STARTING_FEN)
     parser.add_argument("--max-plies", type=int, default=200)
