@@ -15,6 +15,8 @@ class GameSummary:
     agent_color: chess.Color
     plies: int
     termination: str
+    agent_nodes: int = 0
+    agent_table_hits: int = 0
 
     @property
     def agent_score(self) -> float:
@@ -67,6 +69,8 @@ def play_game(
         chess.BLACK: black_agent,
     }
     termination = "normal"
+    agent_nodes = 0
+    agent_table_hits = 0
 
     for ply in range(1, max_plies + 1):
         if board.is_game_over(claim_draw=True):
@@ -74,6 +78,12 @@ def play_game(
 
         moving_color = board.turn
         move = agents[moving_color].select_move(board)
+        if moving_color == agent_color:
+            result = getattr(agents[moving_color], "last_result", None)
+            if result is not None:
+                agent_nodes += result.nodes
+                agent_table_hits += result.table_hits
+
         if move is None:
             termination = "resignation"
             return GameSummary(
@@ -82,6 +92,8 @@ def play_game(
                 agent_color=agent_color,
                 plies=ply - 1,
                 termination=termination,
+                agent_nodes=agent_nodes,
+                agent_table_hits=agent_table_hits,
             )
 
         board.push(move)
@@ -93,6 +105,8 @@ def play_game(
                 agent_color=agent_color,
                 plies=max_plies,
                 termination="max plies",
+                agent_nodes=agent_nodes,
+                agent_table_hits=agent_table_hits,
             )
 
     return GameSummary(
@@ -101,6 +115,8 @@ def play_game(
         agent_color=agent_color,
         plies=len(board.move_stack),
         termination=termination,
+        agent_nodes=agent_nodes,
+        agent_table_hits=agent_table_hits,
     )
 
 
@@ -162,7 +178,9 @@ def print_match_summary(
         color = "white" if game.agent_color == chess.WHITE else "black"
         print(
             f"Game {game.index:03d}: {game.result:7s} | "
-            f"agent={color:5s} | plies={game.plies:3d} | {game.termination}"
+            f"agent={color:5s} | plies={game.plies:3d} | "
+            f"nodes={game.agent_nodes:7d} | tt_hits={game.agent_table_hits:5d} | "
+            f"{game.termination}"
         )
 
     total_games = len(summary.games)
@@ -181,6 +199,11 @@ def print_match_summary(
     print(
         "W/D/L:    "
         f"{summary.agent_wins}/{summary.draws}/{summary.opponent_wins}"
+    )
+    print(
+        "Search:   "
+        f"nodes={sum(game.agent_nodes for game in summary.games)} | "
+        f"tt_hits={sum(game.agent_table_hits for game in summary.games)}"
     )
 
 

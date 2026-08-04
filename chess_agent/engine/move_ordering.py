@@ -3,18 +3,41 @@ import chess
 from chess_agent.engine.evaluation import PIECE_VALUES
 
 
-def ordered_moves(board: chess.Board) -> list[chess.Move]:
+def ordered_moves(
+    board: chess.Board,
+    preferred_move: chess.Move | None = None,
+) -> list[chess.Move]:
     """Return legal moves sorted so alpha-beta can prune earlier."""
     return sorted(
         board.legal_moves,
+        key=lambda move: move_order_score(board, move, preferred_move),
+        reverse=True,
+    )
+
+
+def ordered_tactical_moves(board: chess.Board) -> list[chess.Move]:
+    """Return noisy legal moves worth extending in quiescence search."""
+    return sorted(
+        (
+            move
+            for move in board.legal_moves
+            if board.is_capture(move) or move.promotion is not None
+        ),
         key=lambda move: move_order_score(board, move),
         reverse=True,
     )
 
 
-def move_order_score(board: chess.Board, move: chess.Move) -> int:
+def move_order_score(
+    board: chess.Board,
+    move: chess.Move,
+    preferred_move: chess.Move | None = None,
+) -> int:
     """Score moves only for search ordering, not for final evaluation."""
     score = 0
+
+    if move == preferred_move:
+        score += 1_000_000
 
     if board.is_capture(move):
         victim = captured_piece_type(board, move)

@@ -24,6 +24,8 @@ def test_play_game_treats_max_plies_as_draw() -> None:
     assert summary.result == "1/2-1/2"
     assert summary.plies == 1
     assert summary.termination == "max plies"
+    assert summary.agent_nodes == 0
+    assert summary.agent_table_hits == 0
 
 
 def test_run_match_alternates_agent_color() -> None:

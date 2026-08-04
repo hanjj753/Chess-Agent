@@ -9,7 +9,7 @@
 - 랜덤 에이전트
 - 사람이 직접 수를 입력하는 에이전트
 - 외부 UCI 엔진 실행용 에이전트
-- negamax + alpha-beta pruning 기반 에이전트
+- negamax + alpha-beta pruning + quiescence search + transposition table 기반 에이전트
 - 기물 점수 + piece-square table 기반 평가 함수
 - 잡는 수, 프로모션, 체크를 먼저 보는 단순 move ordering
 
@@ -57,6 +57,7 @@ Alpha-beta 에이전트와 랜덤 에이전트를 대국시키려면:
 
 한 판이 아니라 여러 판을 돌려 승/무/패와 점수율을 보려면 `match` 모드를 사용합니다.
 기본적으로 매 게임마다 백/흑을 번갈아 둡니다.
+각 게임마다 우리 에이전트가 탐색한 `nodes`와 transposition table 재사용 횟수인 `tt_hits`도 출력합니다.
 
 ```powershell
 .\.venv\Scripts\python -m chess_agent.match --agent alpha --opponent random --games 20 --depth 3
