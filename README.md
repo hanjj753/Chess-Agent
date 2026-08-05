@@ -107,6 +107,15 @@ Stockfish 약화 버전과 비교하려면:
 .\.venv\Scripts\python -m chess_agent.analyze_game analysis/losses/loss_파일명.pgn --engine stockfish --engine-time 0.1 --gui
 ```
 
+폴더 안의 패배 PGN들을 한 번에 요약하려면:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.analyze_batch analysis/losses --engine stockfish --engine-time 0.1
+```
+
+이미 `.analysis.json` 파일이 있으면 기본적으로 재사용합니다.
+다시 분석하려면 `--no-reuse`를 붙입니다.
+
 ## 테스트 실행
 
 ```powershell
