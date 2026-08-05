@@ -21,6 +21,11 @@ def main() -> None:
         default="random",
     )
     parser.add_argument("--depth", type=int, default=3)
+    parser.add_argument(
+        "--time-limit",
+        type=float,
+        help="Seconds per move for local alpha-beta agents. Uses iterative deepening.",
+    )
     parser.add_argument("--white-engine", help="Path or engines/ subfolder for white UCI engine")
     parser.add_argument("--black-engine", help="Path or engines/ subfolder for black UCI engine")
     parser.add_argument("--engine-time", type=float, default=0.1)
@@ -56,6 +61,7 @@ def main() -> None:
         chess.WHITE: make_agent(
             args.white,
             depth=args.depth,
+            time_limit=args.time_limit,
             engine_path=args.white_engine,
             engine_time=args.engine_time,
             engine_depth=args.engine_depth,
@@ -65,6 +71,7 @@ def main() -> None:
         chess.BLACK: make_agent(
             args.black,
             depth=args.depth,
+            time_limit=args.time_limit,
             engine_path=args.black_engine,
             engine_time=args.engine_time,
             engine_depth=args.engine_depth,

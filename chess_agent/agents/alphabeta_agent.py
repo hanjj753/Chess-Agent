@@ -7,10 +7,11 @@ from chess_agent.engine.search import SearchResult, TranspositionTable, find_bes
 class AlphaBetaAgent(Agent):
     name = "alpha"
 
-    def __init__(self, depth: int = 3):
+    def __init__(self, depth: int = 3, time_limit: float | None = None):
         if depth < 1:
             raise ValueError("depth must be at least 1")
         self.depth = depth
+        self.time_limit = time_limit
         self.last_result: SearchResult | None = None
         self.transposition_table: TranspositionTable = {}
 
@@ -19,6 +20,7 @@ class AlphaBetaAgent(Agent):
             board,
             depth=self.depth,
             table=self.transposition_table,
+            time_limit=self.time_limit,
         )
         return self.last_result.move
 

@@ -15,6 +15,13 @@ def test_make_agent_creates_alpha_agent_with_depth() -> None:
     assert agent.depth == 4
 
 
+def test_make_agent_creates_alpha_agent_with_time_limit() -> None:
+    agent = make_agent("alpha", depth=8, time_limit=0.5)
+
+    assert isinstance(agent, AlphaBetaAgent)
+    assert agent.time_limit == 0.5
+
+
 def test_make_uci_agent_requires_engine_path() -> None:
     with pytest.raises(ValueError):
         make_agent("uci", depth=1)

@@ -33,6 +33,13 @@ Alpha-beta 에이전트와 랜덤 에이전트를 대국시키려면:
 .\.venv\Scripts\python -m chess_agent.play --white alpha --black random --depth 3
 ```
 
+시간 기준으로 탐색하려면 `--time-limit`을 붙입니다.
+이 경우 depth 1부터 `--depth`까지 차례로 깊게 보다가 제한 시간이 되면 마지막으로 완성한 깊이의 수를 둡니다.
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.play --white alpha --black random --depth 8 --time-limit 0.5
+```
+
 사람이 백으로 직접 두고 alpha-beta 에이전트와 대국하려면:
 
 ```powershell
@@ -79,6 +86,26 @@ Stockfish 약화 버전과 비교하려면:
 ```
 
 색을 번갈아 두지 않고 고정하려면 `--fixed-colors`를 붙입니다.
+
+진 경기만 PGN으로 저장하려면 `--save-losses`를 붙입니다.
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.match --agent alpha --opponent uci --opponent-engine stockfish --games 10 --depth 8 --time-limit 0.5 --engine-time 0.1 --opponent-engine-option "UCI_LimitStrength=true" --opponent-engine-option "UCI_Elo=1600" --save-losses analysis/losses
+```
+
+## 진 경기 분석
+
+저장된 PGN을 Stockfish로 분석하려면:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.analyze_game analysis/losses/loss_파일명.pgn --engine stockfish --engine-time 0.1
+```
+
+분석 결과를 GUI로 넘겨보려면 `--gui`를 붙입니다.
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.analyze_game analysis/losses/loss_파일명.pgn --engine stockfish --engine-time 0.1 --gui
+```
 
 ## 테스트 실행
 

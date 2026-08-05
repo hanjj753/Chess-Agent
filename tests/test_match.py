@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import chess
 
 from chess_agent.agents.base import Agent
@@ -9,6 +11,13 @@ class FirstLegalAgent(Agent):
 
     def select_move(self, board: chess.Board) -> chess.Move | None:
         return next(iter(board.legal_moves), None)
+
+
+class ResigningAgent(Agent):
+    name = "resigning"
+
+    def select_move(self, board: chess.Board) -> chess.Move | None:
+        return None
 
 
 def test_play_game_treats_max_plies_as_draw() -> None:
@@ -61,3 +70,38 @@ def test_match_summary_counts_draws() -> None:
     assert summary.agent_wins == 0
     assert summary.draws == 2
     assert summary.opponent_wins == 0
+
+
+def test_play_game_saves_agent_loss_pgn(tmp_path: Path) -> None:
+    summary = play_game(
+        index=1,
+        white_agent=ResigningAgent(),
+        black_agent=FirstLegalAgent(),
+        agent_color=chess.WHITE,
+        fen=chess.STARTING_FEN,
+        max_plies=10,
+        white_name="alpha",
+        black_name="stockfish",
+        save_loss_dir=tmp_path,
+    )
+
+    assert summary.agent_score == 0.0
+    assert summary.pgn_path is not None
+    assert Path(summary.pgn_path).exists()
+    assert '[White "alpha"]' in Path(summary.pgn_path).read_text(encoding="utf-8")
+
+
+def test_play_game_does_not_save_draw_pgn(tmp_path: Path) -> None:
+    summary = play_game(
+        index=1,
+        white_agent=FirstLegalAgent(),
+        black_agent=FirstLegalAgent(),
+        agent_color=chess.WHITE,
+        fen=chess.STARTING_FEN,
+        max_plies=1,
+        save_loss_dir=tmp_path,
+    )
+
+    assert summary.agent_score == 0.5
+    assert summary.pgn_path is None
+    assert list(tmp_path.iterdir()) == []

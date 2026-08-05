@@ -72,6 +72,35 @@ def test_find_best_move_reports_table_hits() -> None:
     assert result.table_hits >= 0
 
 
+def test_time_limited_search_falls_back_to_legal_move() -> None:
+    board = chess.Board()
+
+    result = find_best_move(board, depth=8, time_limit=0.0)
+
+    assert result.move in board.legal_moves
+    assert result.depth == 0
+    assert result.timed_out
+
+
+def test_time_limited_search_does_not_mutate_board_on_timeout() -> None:
+    board = chess.Board()
+    original_fen = board.fen()
+
+    find_best_move(board, depth=8, time_limit=0.0)
+
+    assert board.fen() == original_fen
+
+
+def test_time_limited_search_reports_completed_depth() -> None:
+    board = chess.Board()
+
+    result = find_best_move(board, depth=2, time_limit=1.0)
+
+    assert result.move in board.legal_moves
+    assert result.depth >= 1
+    assert result.elapsed_seconds >= 0
+
+
 def test_alpha_beta_agent_reuses_cache_between_searches() -> None:
     board = chess.Board()
     agent = AlphaBetaAgent(depth=2)
@@ -82,3 +111,13 @@ def test_alpha_beta_agent_reuses_cache_between_searches() -> None:
     agent.select_move(board)
 
     assert agent.last_result.table_hits > first_hits
+
+
+def test_alpha_beta_agent_accepts_time_limit() -> None:
+    board = chess.Board()
+    agent = AlphaBetaAgent(depth=8, time_limit=0.01)
+
+    move = agent.select_move(board)
+
+    assert move in board.legal_moves
+    assert agent.last_result.elapsed_seconds >= 0

@@ -1,7 +1,11 @@
 import argparse
 from dataclasses import dataclass
+from pathlib import Path
+import re
+import time
 
 import chess
+import chess.pgn
 
 from chess_agent.agent_factory import AGENT_CHOICES, close_agent, make_agent
 from chess_agent.agents.base import Agent
@@ -17,6 +21,8 @@ class GameSummary:
     termination: str
     agent_nodes: int = 0
     agent_table_hits: int = 0
+    pgn: str = ""
+    pgn_path: str | None = None
 
     @property
     def agent_score(self) -> float:
@@ -62,6 +68,9 @@ def play_game(
     agent_color: chess.Color,
     fen: str,
     max_plies: int,
+    white_name: str = "white",
+    black_name: str = "black",
+    save_loss_dir: Path | None = None,
 ) -> GameSummary:
     board = chess.Board(fen)
     agents = {
@@ -86,7 +95,8 @@ def play_game(
 
         if move is None:
             termination = "resignation"
-            return GameSummary(
+            return build_game_summary(
+                board=board,
                 index=index,
                 result="0-1" if moving_color == chess.WHITE else "1-0",
                 agent_color=agent_color,
@@ -94,12 +104,16 @@ def play_game(
                 termination=termination,
                 agent_nodes=agent_nodes,
                 agent_table_hits=agent_table_hits,
+                white_name=white_name,
+                black_name=black_name,
+                save_loss_dir=save_loss_dir,
             )
 
         board.push(move)
     else:
         if not board.is_game_over(claim_draw=True):
-            return GameSummary(
+            return build_game_summary(
+                board=board,
                 index=index,
                 result="1/2-1/2",
                 agent_color=agent_color,
@@ -107,9 +121,13 @@ def play_game(
                 termination="max plies",
                 agent_nodes=agent_nodes,
                 agent_table_hits=agent_table_hits,
+                white_name=white_name,
+                black_name=black_name,
+                save_loss_dir=save_loss_dir,
             )
 
-    return GameSummary(
+    return build_game_summary(
+        board=board,
         index=index,
         result=board.result(claim_draw=True),
         agent_color=agent_color,
@@ -117,6 +135,9 @@ def play_game(
         termination=termination,
         agent_nodes=agent_nodes,
         agent_table_hits=agent_table_hits,
+        white_name=white_name,
+        black_name=black_name,
+        save_loss_dir=save_loss_dir,
     )
 
 
@@ -130,6 +151,9 @@ def run_match(
     fen: str,
     max_plies: int,
     show_progress: bool = False,
+    agent_name: str = "agent",
+    opponent_name: str = "opponent",
+    save_loss_dir: Path | None = None,
 ) -> MatchSummary:
     game_summaries = []
 
@@ -142,9 +166,13 @@ def run_match(
         if agent_color == chess.WHITE:
             white_agent = agent
             black_agent = opponent
+            white_name = agent_name
+            black_name = opponent_name
         else:
             white_agent = opponent
             black_agent = agent
+            white_name = opponent_name
+            black_name = agent_name
 
         if show_progress:
             color = "white" if agent_color == chess.WHITE else "black"
@@ -162,6 +190,9 @@ def run_match(
                 agent_color=agent_color,
                 fen=fen,
                 max_plies=max_plies,
+                white_name=white_name,
+                black_name=black_name,
+                save_loss_dir=save_loss_dir,
             )
         )
 
@@ -182,6 +213,8 @@ def print_match_summary(
             f"nodes={game.agent_nodes:7d} | tt_hits={game.agent_table_hits:5d} | "
             f"{game.termination}"
         )
+        if game.pgn_path is not None:
+            print(f"           saved loss: {game.pgn_path}")
 
     total_games = len(summary.games)
     score_rate = summary.agent_points / total_games if total_games else 0.0
@@ -215,12 +248,104 @@ def parse_color(raw_color: str) -> chess.Color:
     raise ValueError(f"unknown color: {raw_color}")
 
 
+def build_game_summary(
+    *,
+    board: chess.Board,
+    index: int,
+    result: str,
+    agent_color: chess.Color,
+    plies: int,
+    termination: str,
+    agent_nodes: int,
+    agent_table_hits: int,
+    white_name: str,
+    black_name: str,
+    save_loss_dir: Path | None,
+) -> GameSummary:
+    pgn = board_to_pgn(
+        board=board,
+        result=result,
+        white_name=white_name,
+        black_name=black_name,
+    )
+    summary = GameSummary(
+        index=index,
+        result=result,
+        agent_color=agent_color,
+        plies=plies,
+        termination=termination,
+        agent_nodes=agent_nodes,
+        agent_table_hits=agent_table_hits,
+        pgn=pgn,
+    )
+
+    if save_loss_dir is None or summary.agent_score != 0.0:
+        return summary
+
+    pgn_path = save_loss_pgn(
+        pgn=pgn,
+        directory=save_loss_dir,
+        index=index,
+        result=result,
+        agent_color=agent_color,
+    )
+    return GameSummary(
+        index=index,
+        result=result,
+        agent_color=agent_color,
+        plies=plies,
+        termination=termination,
+        agent_nodes=agent_nodes,
+        agent_table_hits=agent_table_hits,
+        pgn=pgn,
+        pgn_path=str(pgn_path),
+    )
+
+
+def board_to_pgn(
+    *,
+    board: chess.Board,
+    result: str,
+    white_name: str,
+    black_name: str,
+) -> str:
+    game = chess.pgn.Game.from_board(board)
+    game.headers["Event"] = "Chess Agent Match"
+    game.headers["White"] = white_name
+    game.headers["Black"] = black_name
+    game.headers["Result"] = result
+    game.headers["PlyCount"] = str(len(board.move_stack))
+    return str(game) + "\n"
+
+
+def save_loss_pgn(
+    *,
+    pgn: str,
+    directory: Path,
+    index: int,
+    result: str,
+    agent_color: chess.Color,
+) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    color = "white" if agent_color == chess.WHITE else "black"
+    safe_result = re.sub(r"[^A-Za-z0-9_.-]+", "_", result)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    path = directory / f"loss_{timestamp}_game_{index:03d}_{color}_{safe_result}.pgn"
+    path.write_text(pgn, encoding="utf-8")
+    return path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--agent", choices=AGENT_CHOICES, default="alpha")
     parser.add_argument("--opponent", choices=AGENT_CHOICES, default="random")
     parser.add_argument("--games", type=int, default=10)
     parser.add_argument("--depth", type=int, default=3)
+    parser.add_argument(
+        "--time-limit",
+        type=float,
+        help="Seconds per move for local alpha-beta agents. Uses iterative deepening.",
+    )
     parser.add_argument("--agent-start-color", choices=["white", "black"], default="white")
     parser.add_argument(
         "--fixed-colors",
@@ -244,11 +369,17 @@ def main() -> None:
     )
     parser.add_argument("--fen", default=chess.STARTING_FEN)
     parser.add_argument("--max-plies", type=int, default=200)
+    parser.add_argument(
+        "--save-losses",
+        type=Path,
+        help="Directory where PGNs for games lost by --agent are saved.",
+    )
     args = parser.parse_args()
 
     agent = make_agent(
         args.agent,
         depth=args.depth,
+        time_limit=args.time_limit,
         engine_path=args.agent_engine,
         engine_time=args.engine_time,
         engine_depth=args.engine_depth,
@@ -258,6 +389,7 @@ def main() -> None:
     opponent = make_agent(
         args.opponent,
         depth=args.depth,
+        time_limit=args.time_limit,
         engine_path=args.opponent_engine,
         engine_time=args.engine_time,
         engine_depth=args.engine_depth,
@@ -275,6 +407,9 @@ def main() -> None:
             fen=args.fen,
             max_plies=args.max_plies,
             show_progress=True,
+            agent_name=args.agent,
+            opponent_name=args.opponent,
+            save_loss_dir=args.save_losses,
         )
         print_match_summary(
             summary=summary,

@@ -10,6 +10,7 @@ def make_agent(
     kind: str,
     *,
     depth: int,
+    time_limit: float | None = None,
     engine_path: str | None = None,
     engine_time: float | None = None,
     engine_depth: int | None = None,
@@ -19,7 +20,7 @@ def make_agent(
     if kind == "random":
         return RandomAgent()
     if kind == "alpha":
-        return AlphaBetaAgent(depth=depth)
+        return AlphaBetaAgent(depth=depth, time_limit=time_limit)
     if kind == "human":
         return HumanAgent()
     if kind == "uci":
