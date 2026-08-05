@@ -39,6 +39,9 @@ Alpha-beta 에이전트와 랜덤 에이전트를 대국시키려면:
 .\.venv\Scripts\python -m chess_agent.play --white human --black alpha --depth 3
 ```
 
+사람이 포함된 대국은 기본적으로 GUI 보드가 열립니다.
+터미널 입력으로 두고 싶으면 `--no-gui`를 붙입니다.
+
 입력할 수의 예시는 다음과 같습니다.
 
 - SAN 표기: `e4`, `Nf3`, `O-O`, `Qxe5+`
@@ -53,6 +56,12 @@ Alpha-beta 에이전트와 랜덤 에이전트를 대국시키려면:
 
 자세한 폴더 예시는 [engines/README.md](<D:/Workspace/Chess/engines/README.md>)를 참고하면 됩니다.
 
+에이전트끼리 두는 대국을 GUI로 보고 싶으면 `--gui`를 붙입니다.
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.play --white alpha --black random --depth 3 --gui --gui-delay-ms 500
+```
+
 ## 여러 판 평가 실행
 
 한 판이 아니라 여러 판을 돌려 승/무/패와 점수율을 보려면 `match` 모드를 사용합니다.
@@ -60,13 +69,13 @@ Alpha-beta 에이전트와 랜덤 에이전트를 대국시키려면:
 각 게임마다 우리 에이전트가 탐색한 `nodes`와 transposition table 재사용 횟수인 `tt_hits`도 출력합니다.
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.match --agent alpha --opponent random --games 20 --depth 3
+.\.venv\Scripts\python -m chess_agent.match --agent alpha --opponent random --games 6 --depth 3
 ```
 
 Stockfish 약화 버전과 비교하려면:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.match --agent alpha --opponent uci --opponent-engine stockfish --games 20 --depth 3 --engine-time 0.1 --opponent-engine-option "UCI_LimitStrength=true" --opponent-engine-option "UCI_Elo=1320"
+.\.venv\Scripts\python -m chess_agent.match --agent alpha --opponent uci --opponent-engine stockfish --games 10 --depth 3 --engine-time 0.1 --opponent-engine-option "UCI_LimitStrength=true" --opponent-engine-option "UCI_Elo=2000"
 ```
 
 색을 번갈아 두지 않고 고정하려면 `--fixed-colors`를 붙입니다.

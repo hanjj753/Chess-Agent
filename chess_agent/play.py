@@ -3,7 +3,9 @@ import argparse
 import chess
 
 from chess_agent.agent_factory import AGENT_CHOICES, close_agent, make_agent
+from chess_agent.agents.human_agent import HumanAgent
 from chess_agent.agents.uci_engine_agent import parse_engine_options
+from chess_agent.gui import run_gui_game
 
 
 def main() -> None:
@@ -36,6 +38,17 @@ def main() -> None:
     )
     parser.add_argument("--fen", default=chess.STARTING_FEN)
     parser.add_argument("--max-plies", type=int, default=200)
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Show a graphical board.",
+    )
+    parser.add_argument(
+        "--no-gui",
+        action="store_true",
+        help="Keep terminal mode even when a human agent is playing.",
+    )
+    parser.add_argument("--gui-delay-ms", type=int, default=300)
     args = parser.parse_args()
 
     board = chess.Board(args.fen)
@@ -61,6 +74,19 @@ def main() -> None:
     }
 
     try:
+        use_gui = args.gui or (
+            not args.no_gui and any(isinstance(agent, HumanAgent) for agent in agents.values())
+        )
+
+        if use_gui:
+            run_gui_game(
+                board=board,
+                agents=agents,
+                max_plies=args.max_plies,
+                move_delay_ms=args.gui_delay_ms,
+            )
+            return
+
         print(board)
         print()
 
