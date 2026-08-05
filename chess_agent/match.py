@@ -11,6 +11,10 @@ from chess_agent.agent_factory import AGENT_CHOICES, close_agent, make_agent
 from chess_agent.agents.base import Agent
 from chess_agent.agents.uci_engine_agent import parse_engine_options
 
+AGENT_COLOR = "\033[32m"
+OPPONENT_COLOR = "\033[31m"
+RESET_COLOR = "\033[0m"
+
 
 @dataclass(frozen=True)
 class GameSummary:
@@ -204,11 +208,13 @@ def print_match_summary(
     summary: MatchSummary,
     agent_name: str,
     opponent_name: str,
+    use_color: bool = True,
 ) -> None:
     for game in summary.games:
         color = "white" if game.agent_color == chess.WHITE else "black"
+        result = color_result(game.result, game.agent_color, use_color=use_color)
         print(
-            f"Game {game.index:03d}: {game.result:7s} | "
+            f"Game {game.index:03d}: {result} | "
             f"agent={color:5s} | plies={game.plies:3d} | "
             f"nodes={game.agent_nodes:7d} | tt_hits={game.agent_table_hits:5d} | "
             f"{game.termination}"
@@ -226,7 +232,8 @@ def print_match_summary(
     print(f"Games:    {total_games}")
     print(
         "Score:    "
-        f"{summary.agent_points:.1f} - {summary.opponent_points:.1f} "
+        f"{paint_role_score(summary.agent_points, AGENT_COLOR, use_color=use_color)} - "
+        f"{paint_role_score(summary.opponent_points, OPPONENT_COLOR, use_color=use_color)} "
         f"({score_rate:.1%})"
     )
     print(
@@ -238,6 +245,63 @@ def print_match_summary(
         f"nodes={sum(game.agent_nodes for game in summary.games)} | "
         f"tt_hits={sum(game.agent_table_hits for game in summary.games)}"
     )
+
+
+def color_result(
+    result: str,
+    agent_color: chess.Color,
+    *,
+    use_color: bool = True,
+) -> str:
+    if result == "1-0":
+        white_score = paint_role_score(
+            "1",
+            AGENT_COLOR if agent_color == chess.WHITE else OPPONENT_COLOR,
+            use_color=use_color,
+        )
+        black_score = paint_role_score(
+            "0",
+            AGENT_COLOR if agent_color == chess.BLACK else OPPONENT_COLOR,
+            use_color=use_color,
+        )
+        return f"{white_score}-{black_score}"
+    if result == "0-1":
+        white_score = paint_role_score(
+            "0",
+            AGENT_COLOR if agent_color == chess.WHITE else OPPONENT_COLOR,
+            use_color=use_color,
+        )
+        black_score = paint_role_score(
+            "1",
+            AGENT_COLOR if agent_color == chess.BLACK else OPPONENT_COLOR,
+            use_color=use_color,
+        )
+        return f"{white_score}-{black_score}"
+    if result == "1/2-1/2":
+        white_score = paint_role_score(
+            "1/2",
+            AGENT_COLOR if agent_color == chess.WHITE else OPPONENT_COLOR,
+            use_color=use_color,
+        )
+        black_score = paint_role_score(
+            "1/2",
+            AGENT_COLOR if agent_color == chess.BLACK else OPPONENT_COLOR,
+            use_color=use_color,
+        )
+        return f"{white_score}-{black_score}"
+    return result
+
+
+def paint_role_score(
+    score: float | str,
+    color: str,
+    *,
+    use_color: bool = True,
+) -> str:
+    text = f"{score:.1f}" if isinstance(score, float) else score
+    if not use_color:
+        return text
+    return f"{color}{text}{RESET_COLOR}"
 
 
 def parse_color(raw_color: str) -> chess.Color:
@@ -374,6 +438,11 @@ def main() -> None:
         type=Path,
         help="Directory where PGNs for games lost by --agent are saved.",
     )
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable colored score output.",
+    )
     args = parser.parse_args()
 
     agent = make_agent(
@@ -415,6 +484,7 @@ def main() -> None:
             summary=summary,
             agent_name=args.agent,
             opponent_name=args.opponent,
+            use_color=not args.no_color,
         )
     finally:
         close_agent(agent)

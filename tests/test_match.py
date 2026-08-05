@@ -3,7 +3,7 @@ from pathlib import Path
 import chess
 
 from chess_agent.agents.base import Agent
-from chess_agent.match import play_game, run_match
+from chess_agent.match import color_result, play_game, run_match
 
 
 class FirstLegalAgent(Agent):
@@ -70,6 +70,18 @@ def test_match_summary_counts_draws() -> None:
     assert summary.agent_wins == 0
     assert summary.draws == 2
     assert summary.opponent_wins == 0
+
+
+def test_color_result_marks_agent_black_score_green() -> None:
+    assert color_result("1-0", chess.BLACK) == "\033[31m1\033[0m-\033[32m0\033[0m"
+
+
+def test_color_result_marks_agent_white_score_green() -> None:
+    assert color_result("0-1", chess.WHITE) == "\033[32m0\033[0m-\033[31m1\033[0m"
+
+
+def test_color_result_can_be_disabled() -> None:
+    assert color_result("1/2-1/2", chess.WHITE, use_color=False) == "1/2-1/2"
 
 
 def test_play_game_saves_agent_loss_pgn(tmp_path: Path) -> None:
