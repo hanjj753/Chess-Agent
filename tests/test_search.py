@@ -6,9 +6,13 @@ from chess_agent.engine.search import (
     NEG_INF,
     POS_INF,
     SearchStats,
+    child_search_window,
     find_best_move,
     negamax,
     quiescence,
+    score_from_table,
+    score_to_table,
+    terminal_score,
 )
 
 
@@ -61,6 +65,52 @@ def test_transposition_table_reuses_deeper_entry_for_shallower_search() -> None:
 
     assert shallower_score == deeper_score
     assert stats.table_hits == first_hits + 1
+
+
+def test_terminal_score_prefers_later_mate_for_mated_side() -> None:
+    board = chess.Board("7k/6Q1/6K1/8/8/8/8/8 b - - 0 1")
+
+    assert board.is_checkmate()
+    assert terminal_score(board, ply_from_root=5) > terminal_score(
+        board,
+        ply_from_root=1,
+    )
+
+
+def test_transposition_table_preserves_mate_distance_relative_to_ply() -> None:
+    stored = score_to_table(99_997, ply_from_root=3)
+
+    assert score_from_table(stored, ply_from_root=1) == 99_999
+
+
+def test_checking_move_extends_search_depth() -> None:
+    board = chess.Board("8/1kp4p/4BQ2/4P3/p2q4/5P2/PPb3PP/1R3K1R w - - 0 28")
+    checking_move = board.parse_san("Bd5+")
+
+    child_depth, extensions_remaining = child_search_window(
+        board,
+        checking_move,
+        depth=3,
+        extensions_remaining=2,
+    )
+
+    assert child_depth == 3
+    assert extensions_remaining == 1
+
+
+def test_quiet_move_does_not_extend_search_depth() -> None:
+    board = chess.Board("8/1kp4p/4BQ2/4P3/p2q4/5P2/PPb3PP/1R3K1R w - - 0 28")
+    quiet_move = board.parse_san("Rc1")
+
+    child_depth, extensions_remaining = child_search_window(
+        board,
+        quiet_move,
+        depth=3,
+        extensions_remaining=2,
+    )
+
+    assert child_depth == 2
+    assert extensions_remaining == 2
 
 
 def test_find_best_move_reports_table_hits() -> None:

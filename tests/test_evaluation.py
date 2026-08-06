@@ -4,6 +4,8 @@ from chess_agent.engine.evaluation import (
     CHECKMATE_SCORE,
     bishop_pair_score,
     evaluate,
+    phase_weights,
+    king_development_score,
     king_safety_score,
     material_score,
     mobility_score,
@@ -76,11 +78,65 @@ def test_other_piece_tables_reward_active_squares() -> None:
 
 
 def test_king_table_prefers_safer_early_square() -> None:
-    central_king = chess.Board("6k1/8/8/8/4K3/8/8/8 w - - 0 1")
-    safer_king = chess.Board("6k1/8/8/8/8/8/8/6K1 w - - 0 1")
+    central_king = chess.Board(
+        "rnbqkbnr/pppppppp/8/8/4K3/8/PPPPPPPP/RNBQ1BNR w kq - 0 1"
+    )
+    safer_king = chess.Board(
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQ1BKR w kq - 0 1"
+    )
 
     assert piece_square_score(safer_king, chess.WHITE) > piece_square_score(
         central_king,
+        chess.WHITE,
+    )
+
+
+def test_phase_weights_start_in_opening() -> None:
+    phase = phase_weights(chess.Board())
+
+    assert phase.opening == 1.0
+    assert phase.middlegame == 0.0
+    assert phase.endgame == 0.0
+
+
+def test_phase_weights_detect_endgame_by_material() -> None:
+    board = chess.Board("6k1/8/8/8/4K3/8/4P3/8 w - - 0 1")
+    phase = phase_weights(board)
+
+    assert phase.endgame > 0.9
+    assert phase.opening == 0.0
+
+
+def test_endgame_king_table_rewards_active_king() -> None:
+    passive = chess.Board("6k1/8/8/8/8/8/8/6K1 w - - 0 1")
+    active = chess.Board("6k1/8/8/8/4K3/8/8/8 w - - 0 1")
+
+    assert piece_square_score(active, chess.WHITE) > piece_square_score(
+        passive,
+        chess.WHITE,
+    )
+
+
+def test_opening_king_development_penalizes_early_king_walk() -> None:
+    safe = chess.Board()
+    exposed = chess.Board(
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPKPPP/RNBQ1BNR w kq - 0 1"
+    )
+
+    assert king_development_score(safe, chess.WHITE) > king_development_score(
+        exposed,
+        chess.WHITE,
+    )
+
+
+def test_opening_king_development_rewards_castling() -> None:
+    uncastled = chess.Board()
+    castled = chess.Board(
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQ1RK1 w kq - 0 1"
+    )
+
+    assert king_development_score(castled, chess.WHITE) > king_development_score(
+        uncastled,
         chess.WHITE,
     )
 

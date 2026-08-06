@@ -4,11 +4,13 @@ from typing import Hashable, Literal
 
 import chess
 
-from chess_agent.engine.evaluation import evaluate
+from chess_agent.engine.evaluation import CHECKMATE_SCORE, evaluate
 from chess_agent.engine.move_ordering import ordered_moves, ordered_tactical_moves
 
 NEG_INF = -10**9
 POS_INF = 10**9
+MATE_SCORE_THRESHOLD = CHECKMATE_SCORE - 10_000
+CHECK_EXTENSIONS = 1
 
 
 @dataclass(frozen=True)
@@ -204,16 +206,24 @@ def search_root(
 
     for move in ordered_moves(board):
         deadline.check()
+        child_depth, child_extensions = child_search_window(
+            board,
+            move,
+            depth,
+            CHECK_EXTENSIONS,
+        )
         board.push(move)
         try:
             score = -negamax(
                 board,
-                depth - 1,
+                child_depth,
                 -beta,
                 -alpha,
                 stats,
                 table,
                 deadline,
+                ply_from_root=1,
+                extensions_remaining=child_extensions,
             )
         finally:
             board.pop()
@@ -238,6 +248,8 @@ def negamax(
     stats: SearchStats,
     table: TranspositionTable | None = None,
     deadline: SearchDeadline | None = None,
+    ply_from_root: int = 0,
+    extensions_remaining: int = CHECK_EXTENSIONS,
 ) -> int:
     """Return the position score from the side-to-move perspective."""
     if table is None:
@@ -249,10 +261,10 @@ def negamax(
     stats.nodes += 1
 
     if board.is_game_over(claim_draw=True):
-        return evaluate(board)
+        return terminal_score(board, ply_from_root)
 
     if depth == 0:
-        return quiescence(board, alpha, beta, stats, deadline)
+        return quiescence(board, alpha, beta, stats, deadline, ply_from_root)
 
     original_alpha = alpha
     original_beta = beta
@@ -262,31 +274,40 @@ def negamax(
     if cached_entry is not None and cached_entry.depth >= depth:
         stats.table_hits += 1
         cached_best_move = cached_entry.best_move
+        cached_score = score_from_table(cached_entry.score, ply_from_root)
 
         if cached_entry.bound == "exact":
-            return cached_entry.score
+            return cached_score
         if cached_entry.bound == "lower":
-            alpha = max(alpha, cached_entry.score)
+            alpha = max(alpha, cached_score)
         elif cached_entry.bound == "upper":
-            beta = min(beta, cached_entry.score)
+            beta = min(beta, cached_score)
 
         if alpha >= beta:
-            return cached_entry.score
+            return cached_score
 
     best_score = NEG_INF
     best_move = None
 
     for move in ordered_moves(board, preferred_move=cached_best_move):
+        child_depth, child_extensions = child_search_window(
+            board,
+            move,
+            depth,
+            extensions_remaining,
+        )
         board.push(move)
         try:
             score = -negamax(
                 board,
-                depth - 1,
+                child_depth,
                 -beta,
                 -alpha,
                 stats,
                 table,
                 deadline,
+                ply_from_root=ply_from_root + 1,
+                extensions_remaining=child_extensions,
             )
         finally:
             board.pop()
@@ -309,11 +330,46 @@ def negamax(
 
     table[key] = TranspositionEntry(
         depth=depth,
-        score=best_score,
+        score=score_to_table(best_score, ply_from_root),
         bound=bound,
         best_move=best_move,
     )
     return best_score
+
+
+def child_search_window(
+    board: chess.Board,
+    move: chess.Move,
+    depth: int,
+    extensions_remaining: int,
+) -> tuple[int, int]:
+    if extensions_remaining > 0 and board.gives_check(move):
+        return depth, extensions_remaining - 1
+    return depth - 1, extensions_remaining
+
+
+def terminal_score(board: chess.Board, ply_from_root: int) -> int:
+    if board.is_checkmate():
+        return -CHECKMATE_SCORE + ply_from_root
+    if board.is_game_over(claim_draw=True):
+        return 0
+    return evaluate(board)
+
+
+def score_to_table(score: int, ply_from_root: int) -> int:
+    if score > MATE_SCORE_THRESHOLD:
+        return score + ply_from_root
+    if score < -MATE_SCORE_THRESHOLD:
+        return score - ply_from_root
+    return score
+
+
+def score_from_table(score: int, ply_from_root: int) -> int:
+    if score > MATE_SCORE_THRESHOLD:
+        return score - ply_from_root
+    if score < -MATE_SCORE_THRESHOLD:
+        return score + ply_from_root
+    return score
 
 
 def board_key(board: chess.Board) -> Hashable:
@@ -328,6 +384,7 @@ def quiescence(
     beta: int,
     stats: SearchStats,
     deadline: SearchDeadline | None = None,
+    ply_from_root: int = 0,
 ) -> int:
     """Search only tactical continuations before evaluating a quiet position."""
     if deadline is None:
@@ -337,7 +394,7 @@ def quiescence(
     stats.nodes += 1
 
     if board.is_game_over(claim_draw=True):
-        return evaluate(board)
+        return terminal_score(board, ply_from_root)
 
     if board.is_check():
         best_score = NEG_INF
@@ -345,7 +402,14 @@ def quiescence(
             deadline.check()
             board.push(move)
             try:
-                score = -quiescence(board, -beta, -alpha, stats, deadline)
+                score = -quiescence(
+                    board,
+                    -beta,
+                    -alpha,
+                    stats,
+                    deadline,
+                    ply_from_root + 1,
+                )
             finally:
                 board.pop()
 
@@ -368,7 +432,14 @@ def quiescence(
         deadline.check()
         board.push(move)
         try:
-            score = -quiescence(board, -beta, -alpha, stats, deadline)
+            score = -quiescence(
+                board,
+                -beta,
+                -alpha,
+                stats,
+                deadline,
+                ply_from_root + 1,
+            )
         finally:
             board.pop()
 
