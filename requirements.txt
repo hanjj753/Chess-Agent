@@ -1,2 +1,3 @@
 python-chess
+gymnasium>=1.1,<2
 pytest
