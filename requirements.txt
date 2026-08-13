@@ -1,3 +1,4 @@
 python-chess
 gymnasium>=1.1,<2
+torch>=2.3,<3
 pytest

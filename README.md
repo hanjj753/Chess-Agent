@@ -25,6 +25,26 @@ python -m venv .venv
 
 이미 `.venv`가 만들어져 있다면 설치 명령만 다시 실행하면 됩니다.
 
+만약 GPU 를 사용하는 환경이라면 아래 명령어를 쳐 CUDA 버전을 확인한 뒤 알맞는 버전의 requirements-torch.txt를 설치하면 됩니다.
+다시 말해,
+
+```powershell
+nvidia-smi
+```
+위 명령어로 CUDA 버전을 확인한 후, CUDA 13.0 아래면
+
+```powershell
+.\.venv\Scripts\python -m pip uninstall -y torch
+.\.venv\Scripts\python -m pip install -r requirements-torch-cu126.txt
+```
+
+CUDA 13.0 이상이면
+```powershell
+.\.venv\Scripts\python -m pip uninstall -y torch
+.\.venv\Scripts\python -m pip install -r requirements-torch-cu130.txt
+```
+
+
 ## 대국 실행
 
 Alpha-beta 에이전트와 랜덤 에이전트를 대국시키려면:
