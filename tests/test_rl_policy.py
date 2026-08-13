@@ -67,3 +67,16 @@ def test_evaluate_policy_counts_episodes() -> None:
 
     assert result.episodes == 4
     assert 0 <= result.successes <= 4
+
+
+def test_evaluate_policy_preserves_policy_device_by_default() -> None:
+    policy = MateInOnePolicy(hidden_size=16)
+    before_device = next(policy.parameters()).device
+
+    evaluate_policy(
+        policy=policy,
+        env=ChessMateInOneEnv(),
+        episodes=1,
+    )
+
+    assert next(policy.parameters()).device == before_device

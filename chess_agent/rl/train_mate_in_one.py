@@ -18,6 +18,7 @@ class TrainingConfig:
     seed: int = 0
     log_every: int = 100
     device: str = "cpu"
+    puzzles_file: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,7 @@ def train_policy_gradient(
         raise ValueError("episodes must be non-negative")
 
     torch.manual_seed(config.seed)
-    env = env or ChessMateInOneEnv()
+    env = env or ChessMateInOneEnv(puzzles_file=config.puzzles_file)
     device = torch.device(config.device)
     policy = (policy or MateInOnePolicy(hidden_size=config.hidden_size)).to(device)
     optimizer = torch.optim.Adam(policy.parameters(), lr=config.learning_rate)
@@ -71,7 +72,12 @@ def train_policy_gradient(
         total_reward += float(reward)
 
         if config.log_every and episode % config.log_every == 0:
-            evaluation = evaluate_policy(policy=policy, env=env, episodes=len(env.puzzles))
+            evaluation = evaluate_policy(
+                policy=policy,
+                env=env,
+                episodes=len(env.puzzles),
+                device=device,
+            )
             print(
                 f"episode={episode:5d} "
                 f"train_success={successes / episode:.1%} "
@@ -80,7 +86,12 @@ def train_policy_gradient(
                 flush=True,
             )
 
-    final_evaluation = evaluate_policy(policy=policy, env=env, episodes=len(env.puzzles))
+    final_evaluation = evaluate_policy(
+        policy=policy,
+        env=env,
+        episodes=len(env.puzzles),
+        device=device,
+    )
     return policy, TrainingResult(
         episodes=config.episodes,
         successes=successes,
@@ -95,14 +106,19 @@ def evaluate_policy(
     policy: MateInOnePolicy,
     env: ChessMateInOneEnv | None = None,
     episodes: int = 100,
-    device: str | torch.device = "cpu",
+    device: str | torch.device | None = None,
 ) -> EvaluationResult:
     if episodes < 0:
         raise ValueError("episodes must be non-negative")
 
     env = env or ChessMateInOneEnv()
-    device = torch.device(device)
-    policy = policy.to(device)
+    if device is None:
+        device = next(policy.parameters()).device
+    else:
+        device = torch.device(device)
+        policy = policy.to(device)
+
+    was_training = policy.training
     policy.eval()
     successes = 0
     illegal_actions = 0
@@ -116,7 +132,7 @@ def evaluate_policy(
         illegal_actions += int(info.get("illegal_action", False))
         total_reward += float(reward)
 
-    policy.train()
+    policy.train(was_training)
     return EvaluationResult(
         episodes=episodes,
         successes=successes,
@@ -183,6 +199,7 @@ def main() -> None:
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--save-path", type=Path)
+    parser.add_argument("--puzzles-file", type=Path)
     args = parser.parse_args()
 
     policy, result = train_policy_gradient(
@@ -193,6 +210,7 @@ def main() -> None:
             seed=args.seed,
             log_every=args.log_every,
             device=args.device,
+            puzzles_file=args.puzzles_file,
         )
     )
 

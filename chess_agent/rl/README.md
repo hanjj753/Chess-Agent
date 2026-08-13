@@ -100,6 +100,12 @@ Final average reward: 1.000
 .\.venv\Scripts\python -m chess_agent.rl.evaluate_mate_in_one --agent policy --model-path tmp\mate_in_one_policy.pt --episodes 4
 ```
 
+GPU에 저장 모델을 올려서 평가하려면 `--device cuda`를 붙입니다.
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_mate_in_one --agent policy --model-path tmp\mate_in_one_policy.pt --episodes 4 --device cuda
+```
+
 ## GPU/CUDA 사용
 
 현재 코드에는 이미 device 옵션이 있습니다.
@@ -185,7 +191,40 @@ CSV 한 줄 읽기
 -> 이 board.fen()을 mate-in-1 puzzle FEN으로 저장
 ```
 
-다음 작업으로는 `data/mate_in_one_fens.txt`를 읽는 기능과, Lichess CSV에서 mate-in-1 FEN만 추출하는 스크립트를 만들면 좋습니다.
+큰 퍼즐 셋을 쓰려면 Lichess CSV에서 mate-in-1 FEN만 추출해서 `data/mate_in_one_fens.txt`로 저장하면 됩니다.
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.utils.extract_mate_in_one_puzzles data\puzzles\lichess_db_puzzle.csv.zst --output data\mate_in_one_fens.txt --limit 10000
+```
+
+난이도 범위를 제한하고 싶으면 rating 필터를 붙입니다.
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.utils.extract_mate_in_one_puzzles data\puzzles\lichess_db_puzzle.csv.zst --output data\mate_in_one_fens.txt --limit 10000 --min-rating 800 --max-rating 1800
+```
+
+정답 move와 rating도 같이 저장하고 싶으면 `--include-solution`을 붙입니다.
+이 경우 각 줄은 `FEN<TAB>solution_uci<TAB>rating` 형태가 됩니다.
+환경은 첫 번째 탭 앞의 FEN만 읽으므로 그대로 사용할 수 있습니다.
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.utils.extract_mate_in_one_puzzles data\puzzles\lichess_db_puzzle.csv.zst --output data\mate_in_one_fens.txt --limit 10000 --include-solution
+```
+
+`.csv`, `.csv.gz`, `.csv.zst` 입력을 지원합니다.
+`.csv.zst`를 읽으려면 `zstandard` 패키지가 필요하며, `requirements.txt`에 포함되어 있습니다.
+
+추출한 퍼즐 파일로 random baseline을 평가하려면:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_mate_in_one --agent random --puzzles-file data\mate_in_one_fens.txt --episodes 1000
+```
+
+추출한 퍼즐 파일로 학습하려면:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.train_mate_in_one --puzzles-file data\mate_in_one_fens.txt --episodes 10000 --hidden-size 256 --learning-rate 0.001 --log-every 500
+```
 
 ## 테스트
 

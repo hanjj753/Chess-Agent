@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 LEARN.md
 tmp/
+data/
 analysis/
 engines/*
 !engines/README.md

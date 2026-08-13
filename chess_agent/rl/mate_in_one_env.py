@@ -1,4 +1,5 @@
 from typing import Any
+from pathlib import Path
 
 import chess
 import gymnasium as gym
@@ -29,6 +30,7 @@ class ChessMateInOneEnv(gym.Env):
         self,
         puzzles: tuple[str, ...] | list[str] | None = None,
         *,
+        puzzles_file: str | Path | None = None,
         render_mode: str | None = None,
         illegal_action_reward: float = -1.0,
         wrong_move_reward: float = -1.0,
@@ -36,8 +38,14 @@ class ChessMateInOneEnv(gym.Env):
     ) -> None:
         if render_mode is not None and render_mode not in self.metadata["render_modes"]:
             raise ValueError(f"unsupported render_mode: {render_mode}")
+        if puzzles is not None and puzzles_file is not None:
+            raise ValueError("use either puzzles or puzzles_file, not both")
 
-        self.puzzles = tuple(puzzles or DEFAULT_MATE_IN_ONE_FENS)
+        self.puzzles = tuple(
+            load_puzzle_fens(puzzles_file)
+            if puzzles_file is not None
+            else puzzles or DEFAULT_MATE_IN_ONE_FENS
+        )
         if not self.puzzles:
             raise ValueError("at least one puzzle is required")
 
@@ -183,3 +191,13 @@ def is_mate_after_move(board: chess.Board, move: chess.Move) -> bool:
     board_copy = board.copy(stack=False)
     board_copy.push(move)
     return board_copy.is_checkmate()
+
+
+def load_puzzle_fens(path: str | Path) -> tuple[str, ...]:
+    fens = []
+    for raw_line in Path(path).read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fens.append(line.split("\t", maxsplit=1)[0])
+    return tuple(fens)

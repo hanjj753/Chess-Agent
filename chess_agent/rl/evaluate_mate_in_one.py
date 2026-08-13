@@ -11,9 +11,11 @@ def main() -> None:
     parser.add_argument("--episodes", type=int, default=1_000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--model-path", type=Path)
+    parser.add_argument("--puzzles-file", type=Path)
+    parser.add_argument("--device", default="cpu")
     args = parser.parse_args()
 
-    env = ChessMateInOneEnv()
+    env = ChessMateInOneEnv(puzzles_file=args.puzzles_file)
     if args.agent == "random":
         result = evaluate_random_baseline(
             env=env,
@@ -27,6 +29,7 @@ def main() -> None:
             env=env,
             model_path=args.model_path,
             episodes=args.episodes,
+            device=args.device,
         )
 
     print_result(args.agent, result)
@@ -37,11 +40,12 @@ def evaluate_saved_policy(
     env: ChessMateInOneEnv,
     model_path: Path,
     episodes: int,
+    device: str,
 ) -> EvaluationResult:
     from chess_agent.rl.train_mate_in_one import evaluate_policy, load_policy
 
-    policy = load_policy(model_path)
-    return evaluate_policy(policy=policy, env=env, episodes=episodes)
+    policy = load_policy(model_path, device=device)
+    return evaluate_policy(policy=policy, env=env, episodes=episodes, device=device)
 
 
 def print_result(agent_name: str, result: EvaluationResult) -> None:
