@@ -5,9 +5,19 @@ from pathlib import Path
 import torch
 from torch.distributions import Categorical
 
+from chess_agent.rl.checkpoints import (
+    load_training_checkpoint,
+    move_optimizer_state_to_device,
+    policy_from_checkpoint,
+    restore_rng_state,
+    save_training_checkpoint,
+)
 from chess_agent.rl.mate_in_one_env import ChessMateInOneEnv
 from chess_agent.rl.policy import MateInOnePolicy, apply_action_mask
 from chess_agent.rl.random_baseline import EvaluationResult
+
+
+POLICY_GRADIENT_CHECKPOINT_KIND = "mate_in_one_policy_gradient"
 
 
 @dataclass(frozen=True)
@@ -19,6 +29,12 @@ class TrainingConfig:
     log_every: int = 100
     device: str = "cpu"
     puzzles_file: Path | None = None
+    evaluation_puzzles_file: Path | None = None
+    evaluation_episodes: int | None = None
+    pretrained_path: Path | None = None
+    checkpoint_path: Path | None = None
+    checkpoint_every: int = 0
+    resume_from: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -43,16 +59,59 @@ def train_policy_gradient(
 ) -> tuple[MateInOnePolicy, TrainingResult]:
     if config.episodes < 0:
         raise ValueError("episodes must be non-negative")
+    if config.evaluation_episodes is not None and config.evaluation_episodes < 0:
+        raise ValueError("evaluation_episodes must be non-negative")
+    if config.checkpoint_every < 0:
+        raise ValueError("checkpoint_every must be non-negative")
+    if config.checkpoint_every and config.checkpoint_path is None:
+        raise ValueError("checkpoint_path is required when checkpoint_every is set")
+    if config.resume_from is not None and config.pretrained_path is not None:
+        raise ValueError("use resume_from or pretrained_path, not both")
+    if config.resume_from is not None and policy is not None:
+        raise ValueError("use resume_from or policy, not both")
 
     torch.manual_seed(config.seed)
     env = env or ChessMateInOneEnv(puzzles_file=config.puzzles_file)
+    evaluation_env = (
+        ChessMateInOneEnv(puzzles_file=config.evaluation_puzzles_file)
+        if config.evaluation_puzzles_file is not None
+        else env
+    )
+    evaluation_episodes = (
+        config.evaluation_episodes
+        if config.evaluation_episodes is not None
+        else len(evaluation_env.puzzles)
+    )
     device = torch.device(config.device)
-    policy = (policy or MateInOnePolicy(hidden_size=config.hidden_size)).to(device)
-    optimizer = torch.optim.Adam(policy.parameters(), lr=config.learning_rate)
+    completed_episodes = 0
     successes = 0
     total_reward = 0.0
+    if config.resume_from is not None:
+        checkpoint = load_training_checkpoint(
+            config.resume_from,
+            expected_kind=POLICY_GRADIENT_CHECKPOINT_KIND,
+        )
+        policy = policy_from_checkpoint(checkpoint, device=device)
+        optimizer = torch.optim.Adam(policy.parameters(), lr=config.learning_rate)
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        move_optimizer_state_to_device(optimizer, device)
+        restore_rng_state(checkpoint, device=device)
 
-    for episode in range(1, config.episodes + 1):
+        progress = checkpoint.get("progress", {})
+        completed_episodes = int(progress.get("completed_episodes", 0))
+        successes = int(progress.get("successes", 0))
+        total_reward = float(progress.get("total_reward", 0.0))
+        if completed_episodes > config.episodes:
+            raise ValueError(
+                "checkpoint has already completed more episodes than requested"
+            )
+    else:
+        if policy is None and config.pretrained_path is not None:
+            policy = load_policy(config.pretrained_path, device=device)
+        policy = (policy or MateInOnePolicy(hidden_size=config.hidden_size)).to(device)
+        optimizer = torch.optim.Adam(policy.parameters(), lr=config.learning_rate)
+
+    for episode in range(completed_episodes + 1, config.episodes + 1):
         observation, _ = env.reset(
             seed=config.seed if episode == 1 else None,
             options={"puzzle_index": (episode - 1) % len(env.puzzles)},
@@ -74,8 +133,8 @@ def train_policy_gradient(
         if config.log_every and episode % config.log_every == 0:
             evaluation = evaluate_policy(
                 policy=policy,
-                env=env,
-                episodes=len(env.puzzles),
+                env=evaluation_env,
+                episodes=evaluation_episodes,
                 device=device,
             )
             print(
@@ -85,18 +144,76 @@ def train_policy_gradient(
                 f"avg_reward={total_reward / episode:.3f}",
                 flush=True,
             )
+        if should_save_checkpoint(
+            checkpoint_path=config.checkpoint_path,
+            checkpoint_every=config.checkpoint_every,
+            step=episode,
+        ):
+            save_policy_gradient_checkpoint(
+                config.checkpoint_path,
+                policy=policy,
+                optimizer=optimizer,
+                completed_episodes=episode,
+                successes=successes,
+                total_reward=total_reward,
+            )
 
     final_evaluation = evaluate_policy(
         policy=policy,
-        env=env,
-        episodes=len(env.puzzles),
+        env=evaluation_env,
+        episodes=evaluation_episodes,
         device=device,
     )
+    if config.checkpoint_path is not None:
+        save_policy_gradient_checkpoint(
+            config.checkpoint_path,
+            policy=policy,
+            optimizer=optimizer,
+            completed_episodes=config.episodes,
+            successes=successes,
+            total_reward=total_reward,
+        )
     return policy, TrainingResult(
         episodes=config.episodes,
         successes=successes,
         total_reward=total_reward,
         final_evaluation=final_evaluation,
+    )
+
+
+def should_save_checkpoint(
+    *,
+    checkpoint_path: Path | None,
+    checkpoint_every: int,
+    step: int,
+) -> bool:
+    return (
+        checkpoint_path is not None
+        and checkpoint_every > 0
+        and step > 0
+        and step % checkpoint_every == 0
+    )
+
+
+def save_policy_gradient_checkpoint(
+    path: str | Path,
+    *,
+    policy: MateInOnePolicy,
+    optimizer: torch.optim.Optimizer,
+    completed_episodes: int,
+    successes: int,
+    total_reward: float,
+) -> Path:
+    return save_training_checkpoint(
+        path,
+        kind=POLICY_GRADIENT_CHECKPOINT_KIND,
+        policy=policy,
+        optimizer=optimizer,
+        progress={
+            "completed_episodes": completed_episodes,
+            "successes": successes,
+            "total_reward": total_reward,
+        },
     )
 
 
@@ -200,6 +317,12 @@ def main() -> None:
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--save-path", type=Path)
     parser.add_argument("--puzzles-file", type=Path)
+    parser.add_argument("--evaluation-puzzles-file", type=Path)
+    parser.add_argument("--evaluation-episodes", type=int)
+    parser.add_argument("--pretrained-path", type=Path)
+    parser.add_argument("--checkpoint-path", type=Path)
+    parser.add_argument("--checkpoint-every", type=int, default=0)
+    parser.add_argument("--resume-from", type=Path)
     args = parser.parse_args()
 
     policy, result = train_policy_gradient(
@@ -211,6 +334,12 @@ def main() -> None:
             log_every=args.log_every,
             device=args.device,
             puzzles_file=args.puzzles_file,
+            evaluation_puzzles_file=args.evaluation_puzzles_file,
+            evaluation_episodes=args.evaluation_episodes,
+            pretrained_path=args.pretrained_path,
+            checkpoint_path=args.checkpoint_path,
+            checkpoint_every=args.checkpoint_every,
+            resume_from=args.resume_from,
         )
     )
 

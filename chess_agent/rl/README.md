@@ -1,7 +1,7 @@
 # RL 실험 메모
 
-이 폴더는 체스 에이전트를 강화학습으로 학습시키기 위한 첫 실험 공간입니다.
-현재 목표는 full chess self-play가 아니라, 작은 `mate-in-1` 퍼즐 환경에서 다음 흐름을 이해하는 것입니다.
+이 폴더는 체스 에이전트를 강화학습으로 학습시키기 위한 실험 공간입니다.
+현재 목표는 full chess self-play가 아니라, 작은 `mate-in-1` 퍼즐 환경에서 다음 흐름을 익히는 것입니다.
 
 ```text
 Gymnasium 환경
@@ -9,8 +9,11 @@ Gymnasium 환경
 -> PyTorch policy가 action logits 출력
 -> 불법 수를 mask로 제거
 -> action 선택
--> reward로 policy 업데이트
+-> reward 또는 label로 policy 업데이트
 ```
+
+중요한 원칙은 학습용 퍼즐과 평가용 퍼즐을 처음부터 분리하는 것입니다.
+`validation` 파일은 모델 선택과 성능 확인에만 쓰고, 학습에는 넣지 않습니다.
 
 ## 현재 구성
 
@@ -19,6 +22,7 @@ Gymnasium 환경
 - `observations.py`: `chess.Board`를 `18 x 8 x 8` 텐서로 변환
 - `random_baseline.py`: 합법 수 중 랜덤 선택 기준선
 - `policy.py`: 작은 PyTorch policy network
+- `train_mate_in_one_supervised.py`: 정답 수를 label로 쓰는 supervised 사전훈련
 - `train_mate_in_one.py`: REINFORCE 방식의 간단한 policy-gradient 학습 루프
 - `evaluate_mate_in_one.py`: random/policy 평가용 CLI
 
@@ -35,75 +39,86 @@ Gymnasium 환경
 - `python-chess`
 - `gymnasium`
 - `torch`
+- `zstandard`
 - `pytest`
+
+## Train/Validation 퍼즐 만들기
+
+추천 데이터 출처는 Lichess puzzle database입니다.
+
+https://database.lichess.org/#puzzles
+
+Lichess puzzle CSV의 `FEN`은 플레이어가 바로 풀 위치가 아니라, 상대가 먼저 한 수를 두기 전의 위치입니다.
+그래서 추출 스크립트는 `Moves`의 첫 번째 수를 먼저 적용하고, 그 다음 위치와 정답 수를 저장합니다.
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.utils.extract_mate_in_one_puzzles data\puzzles\lichess_db_puzzle.csv.zst --train-output data\puzzle_processed\mate_in_one_train.txt --validation-output data\puzzle_processed\mate_in_one_valid.txt --validation-fraction 0.1 --limit 100000 --include-solution --seed 0
+```
+
+각 줄은 `--include-solution`을 붙이면 아래 형식으로 저장됩니다.
+
+```text
+FEN<TAB>solution_uci<TAB>rating
+```
+
+`ChessMateInOneEnv`는 첫 번째 탭 앞의 FEN만 읽기 때문에, 같은 파일을 환경에도 그대로 넣을 수 있습니다.
+
+처음에는 `--limit 100000` 정도로 실험하고, 서버에서 오래 돌릴 때 `200000`, `500000`처럼 늘리는 편이 좋습니다.
+전체를 다 쓰고 싶으면 `--limit`을 빼면 되지만, 파일 생성과 학습 시간이 꽤 길어질 수 있습니다.
+split은 streaming random 방식이라 아주 작은 `--limit`에서는 비율이 정확히 맞지 않을 수 있지만, 데이터가 커지면 `--validation-fraction`에 가까워집니다.
+
+난이도 범위를 제한하고 싶으면 rating 필터를 붙입니다.
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.utils.extract_mate_in_one_puzzles data\puzzles\lichess_db_puzzle.csv.zst --train-output data\puzzle_processed\mate_in_one_train_800_1800.txt --validation-output data\puzzle_processed\mate_in_one_valid_800_1800.txt --validation-fraction 0.1 --limit 100000 --min-rating 800 --max-rating 1800 --include-solution --seed 0
+```
 
 ## 랜덤 기준선 평가
 
-먼저 학습하지 않은 랜덤 agent가 어느 정도 맞히는지 봅니다.
+학습 전에는 랜덤 agent를 평가해서 환경과 action mask가 정상인지 확인합니다.
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_mate_in_one --agent random --episodes 100 --seed 0
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_mate_in_one --agent random --puzzles-file data\puzzle_processed\mate_in_one_valid.txt --episodes 10000 --seed 0
 ```
 
-출력 예시는 다음 형태입니다.
+`Illegal moves`가 0이면 action mask가 잘 작동하고 있다는 뜻입니다.
 
-```text
-Mate-in-one evaluation
-Agent:          random
-Episodes:       100
-Successes:      9
-Success rate:   9.0%
-Illegal moves:  0
-Average reward: -0.820
-```
+## Supervised 사전훈련
 
-여기서 `Illegal moves`가 0이면 action mask가 잘 작동하고 있다는 뜻입니다.
-
-## Policy 학습
-
-현재 학습 코드는 아주 단순한 REINFORCE 방식입니다.
-한 episode는 퍼즐 하나이고, 한 수를 두면 바로 끝납니다.
+mate-in-1 퍼즐은 정답 수가 있는 문제이므로, reward만 보고 맞히기를 기다리는 RL보다 supervised learning으로 먼저 policy를 훈련시키는 편이 훨씬 빠릅니다.
+여기서 supervised learning은 최종 목표가 아니라, RL이 랜덤 policy에서 시작하지 않도록 초기 policy를 만들어주는 역할입니다.
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.train_mate_in_one --episodes 1000 --hidden-size 64 --learning-rate 0.003 --log-every 250 --seed 0
+.\.venv\Scripts\python -m chess_agent.rl.train_mate_in_one_supervised --puzzles-file data\puzzle_processed\mate_in_one_train.txt --validation-file data\puzzle_processed\mate_in_one_valid.txt --epochs 20 --batch-size 512 --hidden-size 512 --learning-rate 0.001 --device cuda --save-path tmp\mate_in_one_supervised.pt --checkpoint-path tmp\mate_in_one_supervised_checkpoint.pt --checkpoint-every 1
 ```
 
-출력 예시는 다음 형태입니다.
-
-```text
-episode=  250 train_success=39.2% eval_success=100.0% avg_reward=-0.216
-episode=  500 train_success=67.0% eval_success=100.0% avg_reward=0.340
-episode=  750 train_success=78.0% eval_success=100.0% avg_reward=0.560
-episode= 1000 train_success=83.5% eval_success=100.0% avg_reward=0.670
-
-Training summary
-Episodes:             1000
-Training success:     83.5%
-Final eval success:   100.0%
-Final average reward: 1.000
-```
-
-현재 기본 퍼즐이 4개뿐이라 `100%`는 "체스를 잘 둔다"가 아니라 "작은 환경에서 학습 루프가 제대로 돈다"는 신호로 해석해야 합니다.
-
-## 모델 저장과 평가
-
-학습한 policy를 저장하려면 `--save-path`를 붙입니다.
-`tmp/`는 gitignore되어 있으므로 임시 실험 결과를 저장하기 좋습니다.
+저장한 supervised policy를 validation 파일에서 평가합니다.
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.train_mate_in_one --episodes 1000 --hidden-size 64 --learning-rate 0.003 --save-path tmp\mate_in_one_policy.pt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_mate_in_one --agent policy --model-path tmp\mate_in_one_supervised.pt --puzzles-file data\puzzle_processed\mate_in_one_valid.txt --episodes 10000 --device cuda
 ```
 
-저장한 모델을 다시 평가하려면:
+## RL Fine-Tuning
+
+supervised로 만든 policy를 초기값으로 넣고 RL을 이어서 돌릴 수 있습니다.
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_mate_in_one --agent policy --model-path tmp\mate_in_one_policy.pt --episodes 4
+.\.venv\Scripts\python -m chess_agent.rl.train_mate_in_one --puzzles-file data\puzzle_processed\mate_in_one_train.txt --evaluation-puzzles-file data\puzzle_processed\mate_in_one_valid.txt --evaluation-episodes 5000 --pretrained-path tmp\mate_in_one_supervised.pt --episodes 100000 --hidden-size 512 --learning-rate 0.00003 --log-every 1000 --device cuda --save-path tmp\mate_in_one_rl.pt --checkpoint-path tmp\mate_in_one_rl_checkpoint.pt --checkpoint-every 5000
 ```
 
-GPU에 저장 모델을 올려서 평가하려면 `--device cuda`를 붙입니다.
+`--evaluation-puzzles-file`은 학습 중 로그와 최종 요약에 사용할 평가 파일입니다.
+`--evaluation-episodes`를 지정하면 validation 전체가 아니라 그 개수만큼만 순회합니다.
+validation 파일이 커질수록 이 옵션을 지정하는 것이 좋습니다.
+
+현재 RL fine-tuning은 아주 단순한 one-step REINFORCE입니다.
+supervised로 80% 이상까지 올린 모델을 이 방식으로 오래 돌리면, 샘플링으로 고른 틀린 수의 negative reward가 이미 배운 분포를 망가뜨려 train/eval 성공률이 내려갈 수 있습니다.
+이럴 때는 learning rate를 크게 낮추고 짧게만 실험하거나, supervised checkpoint를 기준으로 다시 시작하는 편이 낫습니다.
+
+중간부터 이어서 돌리려면 `--resume-from`을 사용합니다.
+`--epochs`와 `--episodes`는 추가로 돌릴 양이 아니라 도달할 총량입니다.
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_mate_in_one --agent policy --model-path tmp\mate_in_one_policy.pt --episodes 4 --device cuda
+.\.venv\Scripts\python -m chess_agent.rl.train_mate_in_one_supervised --puzzles-file data\puzzle_processed\mate_in_one_train.txt --validation-file data\puzzle_processed\mate_in_one_valid.txt --epochs 50 --batch-size 512 --hidden-size 512 --learning-rate 0.001 --device cuda --save-path tmp\mate_in_one_supervised.pt --checkpoint-path tmp\mate_in_one_supervised_checkpoint.pt --checkpoint-every 1 --resume-from tmp\mate_in_one_supervised_checkpoint.pt
 ```
 
 ## GPU/CUDA 사용
@@ -111,127 +126,61 @@ GPU에 저장 모델을 올려서 평가하려면 `--device cuda`를 붙입니�
 현재 코드에는 이미 device 옵션이 있습니다.
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.train_mate_in_one --episodes 1000 --device cuda
+.\.venv\Scripts\python -m chess_agent.rl.train_mate_in_one_supervised --puzzles-file data\puzzle_processed\mate_in_one_train.txt --validation-file data\puzzle_processed\mate_in_one_valid.txt --device cuda
 ```
 
-다만 이 명령이 작동하려면 PyTorch가 CUDA 지원 빌드로 설치되어 있어야 합니다.
-현재 설치 상태는 다음 명령으로 확인합니다.
+설치 상태는 다음 명령으로 확인합니다.
 
 ```powershell
 .\.venv\Scripts\python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.version.cuda)"
 ```
 
-예를 들어 다음처럼 나오면 CPU 빌드입니다.
-
-```text
-2.13.0+cpu
-False
-None
-```
-
-CUDA를 쓰려면 NVIDIA GPU와 호환 드라이버가 필요하고, PyTorch를 CUDA wheel로 다시 설치해야 합니다.
-정확한 설치 명령은 PyTorch 공식 설치 페이지에서 Windows, Pip, Python, CUDA 버전을 선택해서 확인합니다.
-
-https://docs.pytorch.org/get-started/locally/
-
-프로젝트에는 예시용 CUDA requirements 파일도 하나 추가해두었습니다.
-이 파일은 CUDA 12.6 wheel index를 사용합니다.
+`torch.cuda.is_available()`이 `True`이면 `--device cuda`를 사용할 수 있습니다.
+CUDA 빌드 PyTorch가 필요하면 아래 보조 requirements 중 서버 환경에 맞는 것을 설치합니다.
 
 ```powershell
 .\.venv\Scripts\python -m pip uninstall -y torch
+.\.venv\Scripts\python -m pip install -r requirements-torch-cu130.txt
+```
+
+서버의 드라이버가 CUDA 12.6 쪽에 맞으면 다음 파일을 사용할 수도 있습니다.
+
+```powershell
 .\.venv\Scripts\python -m pip install -r requirements-torch-cu126.txt
 ```
 
-하나의 `requirements.txt`가 자동으로 CUDA 버전을 감지해서 맞는 PyTorch를 설치하게 하기는 어렵습니다.
-PyTorch는 CUDA 런타임별로 wheel index URL이 달라질 수 있으므로, 보통 CPU용 기본 requirements와 CUDA 버전별 보조 requirements를 분리합니다.
-
-설치 후 `torch.cuda.is_available()`이 `True`가 되면 `--device cuda`를 사용할 수 있습니다.
-
 주의할 점:
 
-- GPU는 policy network의 forward/backward를 빠르게 합니다.
-- `python-chess`의 합법 수 계산과 `env.step()`은 CPU에서 돌아갑니다.
-- 지금처럼 퍼즐 4개짜리 작은 실험에서는 GPU 이득이 거의 없습니다.
-- 퍼즐이 많아지고 batch 학습을 하거나 모델이 커지면 GPU 이득이 커집니다.
+- GPU는 PyTorch network의 forward/backward를 빠르게 합니다.
+- `python-chess`의 합법 수 계산과 environment logic은 CPU에서 돌아갑니다.
+- 작은 퍼즐 4개짜리 smoke test에서는 GPU 이득이 거의 없습니다.
+- 퍼즐이 많아지고 batch supervised 학습을 할수록 GPU 이득이 커집니다.
 
-## 현재 기본 퍼즐 개수
+## 오래 학습시킬 때 추천 흐름
 
-맞습니다. 현재 기본 퍼즐은 4개뿐입니다.
-위치는 `mate_in_one_env.py`의 `DEFAULT_MATE_IN_ONE_FENS`입니다.
+1. 먼저 `--limit 100000`으로 추출해서 전체 파이프라인을 확인합니다.
+2. supervised 사전훈련을 `20~50` epochs 정도 돌립니다.
+3. validation accuracy와 mate success가 충분히 오르는지 확인합니다.
+4. 서버에서는 `--limit 200000~500000`, `--hidden-size 512`, `--batch-size 512~2048` 범위로 늘려봅니다.
+5. checkpoint를 켠 상태로 supervised 학습을 길게 돌립니다.
+6. RL fine-tuning은 작은 learning rate로 짧게 붙이고, 성능이 내려가면 멈춥니다.
 
-현재 퍼즐:
+일주일 동안 서버에 걸어둘 작업으로는 현재 코드 기준에서 `mate-in-1` supervised 대규모 학습이 가장 안정적입니다.
+다만 이 작업만으로 full chess agent가 되지는 않습니다.
+다음 장기 실험 후보는 Lichess puzzle의 `mateIn2`, `mateIn3`, `fork`, `pin`, `skewer`, `sacrifice` 같은 tactical theme를 다루는 multi-step puzzle 환경입니다.
+이 경우 정답 sequence를 따라 여러 수를 두는 Gymnasium 환경을 새로 만들어야 합니다.
 
-```text
-7k/8/5KQ1/8/8/8/8/8 w - - 0 1
-8/8/8/8/8/5kq1/8/7K b - - 0 1
-6k1/8/6K1/8/8/8/8/R7 w - - 0 1
-r7/8/8/8/8/6k1/8/6K1 b - - 0 1
-```
+## 기본 퍼즐
 
-다음 단계에서는 이 퍼즐들을 코드에 직접 박아두는 대신, `data/` 아래의 텍스트나 CSV 파일에서 mate-in-1 FEN 목록을 읽어오게 만드는 것이 좋습니다.
-
-## mate-in-1 퍼즐을 구하는 방법
-
-가장 추천하는 출처는 Lichess puzzle database입니다.
-Lichess는 퍼즐 CSV를 공개하고 있고, 각 퍼즐에는 `FEN`, `Moves`, `Themes`가 들어 있습니다.
-
-https://database.lichess.org/#puzzles
-
-이 데이터셋에서 `Themes`에 `mateIn1`이 들어간 행만 필터링하면 mate-in-1 퍼즐을 만들 수 있습니다.
-주의할 점은 Lichess puzzle CSV의 `FEN`은 플레이어가 바로 풀 위치가 아니라, 상대가 먼저 한 수를 두기 전의 위치입니다.
-따라서 CSV의 `Moves` 중 첫 번째 UCI move를 `FEN`에 적용한 뒤, 그 다음 위치를 우리 `ChessMateInOneEnv`에 넣어야 합니다.
-
-예시 흐름:
-
-```text
-CSV 한 줄 읽기
--> Themes에 mateIn1이 있는지 확인
--> board = chess.Board(FEN)
--> Moves의 첫 번째 move를 board에 push
--> 이 board.fen()을 mate-in-1 puzzle FEN으로 저장
-```
-
-큰 퍼즐 셋을 쓰려면 Lichess CSV에서 mate-in-1 FEN만 추출해서 `data/mate_in_one_fens.txt`로 저장하면 됩니다.
-
-```powershell
-.\.venv\Scripts\python -m chess_agent.utils.extract_mate_in_one_puzzles data\puzzles\lichess_db_puzzle.csv.zst --output data\mate_in_one_fens.txt --limit 10000
-```
-
-난이도 범위를 제한하고 싶으면 rating 필터를 붙입니다.
-
-```powershell
-.\.venv\Scripts\python -m chess_agent.utils.extract_mate_in_one_puzzles data\puzzles\lichess_db_puzzle.csv.zst --output data\mate_in_one_fens.txt --limit 10000 --min-rating 800 --max-rating 1800
-```
-
-정답 move와 rating도 같이 저장하고 싶으면 `--include-solution`을 붙입니다.
-이 경우 각 줄은 `FEN<TAB>solution_uci<TAB>rating` 형태가 됩니다.
-환경은 첫 번째 탭 앞의 FEN만 읽으므로 그대로 사용할 수 있습니다.
-
-```powershell
-.\.venv\Scripts\python -m chess_agent.utils.extract_mate_in_one_puzzles data\puzzles\lichess_db_puzzle.csv.zst --output data\mate_in_one_fens.txt --limit 10000 --include-solution
-```
-
-`.csv`, `.csv.gz`, `.csv.zst` 입력을 지원합니다.
-`.csv.zst`를 읽으려면 `zstandard` 패키지가 필요하며, `requirements.txt`에 포함되어 있습니다.
-
-추출한 퍼즐 파일로 random baseline을 평가하려면:
-
-```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_mate_in_one --agent random --puzzles-file data\mate_in_one_fens.txt --episodes 1000
-```
-
-추출한 퍼즐 파일로 학습하려면:
-
-```powershell
-.\.venv\Scripts\python -m chess_agent.rl.train_mate_in_one --puzzles-file data\mate_in_one_fens.txt --episodes 10000 --hidden-size 256 --learning-rate 0.001 --log-every 500
-```
+데이터 파일을 넣지 않으면 `mate_in_one_env.py`의 `DEFAULT_MATE_IN_ONE_FENS` 4개만 사용합니다.
+이 4개는 학습 성능 측정용이 아니라, 코드가 돌아가는지 확인하는 smoke test용입니다.
 
 ## 테스트
 
 RL 관련 테스트만 돌리려면:
 
 ```powershell
-.\.venv\Scripts\python -m pytest tests/test_rl_actions.py tests/test_rl_mate_in_one_env.py tests/test_rl_random_baseline.py tests/test_rl_policy.py
+.\.venv\Scripts\python -m pytest tests/test_rl_actions.py tests/test_rl_mate_in_one_env.py tests/test_rl_random_baseline.py tests/test_rl_policy.py tests/test_rl_extract_mate_in_one_puzzles.py tests/test_rl_supervised_training.py
 ```
 
 전체 테스트:
@@ -247,9 +196,10 @@ RL 관련 테스트만 돌리려면:
 1. `mate_in_one_env.py`
 2. `actions.py`
 3. `policy.py`
-4. `train_mate_in_one.py`
+4. `train_mate_in_one_supervised.py`
+5. `train_mate_in_one.py`
 
-특히 `train_mate_in_one.py`의 아래 한 줄이 policy-gradient의 핵심입니다.
+`train_mate_in_one_supervised.py`에서는 정답 move를 cross entropy loss로 맞히고, `train_mate_in_one.py`에서는 아래 한 줄이 policy-gradient의 핵심입니다.
 
 ```python
 loss = -distribution.log_prob(action) * reward_tensor

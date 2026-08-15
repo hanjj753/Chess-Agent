@@ -5,7 +5,7 @@
 #   .\.venv\Scripts\python -m pip uninstall -y torch
 #   .\.venv\Scripts\python -m pip install -r requirements-torch-cu130.txt
 #
-# If your driver/GPU supports a newer CUDA runtime, check the official PyTorch
-# install selector and replace cu126 with the recommended index URL.
+# If your driver/GPU supports a different CUDA runtime, check the official
+# PyTorch install selector and replace cu130 with the recommended index URL.
 --index-url https://download.pytorch.org/whl/cu130
 torch>=2.3,<3

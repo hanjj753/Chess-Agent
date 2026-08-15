@@ -58,6 +58,21 @@ def test_policy_gradient_training_runs() -> None:
     assert 0 <= result.final_evaluation.success_rate <= 1
 
 
+def test_policy_gradient_can_limit_evaluation_episodes() -> None:
+    env = ChessMateInOneEnv()
+    _, result = train_policy_gradient(
+        config=TrainingConfig(
+            episodes=1,
+            hidden_size=16,
+            log_every=0,
+            evaluation_episodes=1,
+        ),
+        env=env,
+    )
+
+    assert result.final_evaluation.episodes == 1
+
+
 def test_evaluate_policy_counts_episodes() -> None:
     result = evaluate_policy(
         policy=MateInOnePolicy(hidden_size=16),
