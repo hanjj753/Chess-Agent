@@ -1,0 +1,96 @@
+from pathlib import Path
+
+import chess
+import numpy as np
+
+from chess_agent.rl.actions import move_to_action
+from chess_agent.rl.evaluate_tactical import evaluate_tactical_random_baseline
+from chess_agent.rl.tactical_puzzle_env import (
+    TacticalPuzzle,
+    TacticalPuzzleEnv,
+    load_tactical_puzzles,
+)
+
+
+def test_tactical_env_plays_forced_line_to_success() -> None:
+    env = TacticalPuzzleEnv(puzzles=[make_tactical_puzzle()])
+    observation, info = env.reset(options={"puzzle_index": 0})
+
+    assert observation["board"].shape == (18, 8, 8)
+    assert info["expected_move_uci"] == "e7e5"
+
+    observation, reward, terminated, _, info = env.step(action("e7e5"))
+
+    assert reward == 0.0
+    assert not terminated
+    assert info["opponent_reply_uci"] == "g1f3"
+    assert info["expected_move_uci"] == "b8c6"
+
+    _, reward, terminated, _, info = env.step(action("b8c6"))
+
+    assert reward == 1.0
+    assert terminated
+    assert info["is_success"]
+    assert info["correct_agent_moves"] == 2
+
+
+def test_tactical_env_rejects_wrong_legal_move() -> None:
+    env = TacticalPuzzleEnv(puzzles=[make_tactical_puzzle()])
+    env.reset(options={"puzzle_index": 0})
+
+    _, reward, terminated, _, info = env.step(action("e7e6"))
+
+    assert reward == -1.0
+    assert terminated
+    assert not info["is_correct"]
+    assert info["expected_move_uci"] == "e7e5"
+
+
+def test_tactical_env_action_masks_are_boolean_for_maskable_rl() -> None:
+    env = TacticalPuzzleEnv(puzzles=[make_tactical_puzzle()])
+    observation, _ = env.reset(options={"puzzle_index": 0})
+
+    assert env.action_masks().dtype == np.bool_
+    assert np.array_equal(env.action_masks(), observation["action_mask"].astype(bool))
+
+
+def test_load_tactical_puzzles_reads_tsv(tmp_path: Path) -> None:
+    path = tmp_path / "tactical.txt"
+    puzzle = make_tactical_puzzle()
+    path.write_text(
+        f"{puzzle.initial_fen}\t{' '.join(puzzle.line_uci)}\t1200\tfork pin\n",
+        encoding="utf-8",
+    )
+
+    puzzles = load_tactical_puzzles(path)
+
+    assert len(puzzles) == 1
+    assert puzzles[0].line_uci == ("e7e5", "g1f3", "b8c6")
+    assert puzzles[0].rating == 1200
+    assert puzzles[0].themes == ("fork", "pin")
+
+
+def test_tactical_random_baseline_runs() -> None:
+    result = evaluate_tactical_random_baseline(
+        env=TacticalPuzzleEnv(puzzles=[make_tactical_puzzle()]),
+        episodes=2,
+        seed=0,
+    )
+
+    assert result.episodes == 2
+    assert 0 <= result.move_accuracy <= 1
+
+
+def make_tactical_puzzle() -> TacticalPuzzle:
+    board = chess.Board()
+    board.push(chess.Move.from_uci("e2e4"))
+    return TacticalPuzzle(
+        initial_fen=board.fen(),
+        line_uci=("e7e5", "g1f3", "b8c6"),
+        rating=1200,
+        themes=("fork", "pin"),
+    )
+
+
+def action(move_uci: str) -> int:
+    return move_to_action(chess.Move.from_uci(move_uci))

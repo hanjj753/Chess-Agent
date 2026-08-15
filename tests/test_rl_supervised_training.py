@@ -38,6 +38,7 @@ def test_load_labeled_puzzles_derives_solution_when_missing(tmp_path: Path) -> N
 def test_supervised_training_runs_and_saves_policy(tmp_path: Path) -> None:
     puzzles_path = write_tiny_puzzle_file(tmp_path)
     save_path = tmp_path / "supervised_policy.pt"
+    best_path = tmp_path / "supervised_best.pt"
 
     _, result = train_supervised_policy(
         SupervisedTrainingConfig(
@@ -46,10 +47,13 @@ def test_supervised_training_runs_and_saves_policy(tmp_path: Path) -> None:
             batch_size=2,
             hidden_size=16,
             save_path=save_path,
+            best_checkpoint_path=best_path,
         )
     )
 
     assert save_path.exists()
+    assert best_path.exists()
+    assert result.best_epoch == 1
     assert 0 <= result.train_accuracy.accuracy <= 1
     assert 0 <= result.validation_mate_success_rate <= 1
 

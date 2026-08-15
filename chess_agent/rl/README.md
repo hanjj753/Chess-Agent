@@ -25,6 +25,9 @@ Gymnasium 환경
 - `train_mate_in_one_supervised.py`: 정답 수를 label로 쓰는 supervised 사전훈련
 - `train_mate_in_one.py`: REINFORCE 방식의 간단한 policy-gradient 학습 루프
 - `evaluate_mate_in_one.py`: random/policy 평가용 CLI
+- `tactical_puzzle_env.py`: 여러 수짜리 Lichess tactical line 환경
+- `train_tactical_supervised.py`: 여러 수짜리 tactical puzzle supervised 학습
+- `evaluate_tactical.py`: tactical puzzle 평가용 CLI
 
 ## 설치
 
@@ -73,6 +76,30 @@ split은 streaming random 방식이라 아주 작은 `--limit`에서는 비율�
 .\.venv\Scripts\python -m chess_agent.utils.extract_mate_in_one_puzzles data\puzzles\lichess_db_puzzle.csv.zst --train-output data\puzzle_processed\mate_in_one_train_800_1800.txt --validation-output data\puzzle_processed\mate_in_one_valid_800_1800.txt --validation-fraction 0.1 --limit 100000 --min-rating 800 --max-rating 1800 --include-solution --seed 0
 ```
 
+## Tactical Puzzle 만들기
+
+mate-in-1 다음 단계는 Lichess puzzle의 여러 수짜리 tactical line을 쓰는 것입니다.
+이 데이터는 한 position에서 한 수만 맞히는 것이 아니라, agent move와 opponent reply가 번갈아 나오는 sequence입니다.
+
+저장 형식은 다음과 같습니다.
+
+```text
+initial_fen<TAB>line_uci<TAB>rating<TAB>themes
+```
+
+여기서 `line_uci`의 짝수 번째 move는 agent가 둘 정답 수이고, 홀수 번째 move는 환경이 자동으로 두는 opponent reply입니다.
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.utils.extract_tactical_puzzles data\puzzles\lichess_db_puzzle.csv.zst --train-output data\puzzle_processed\tactical_train.txt --validation-output data\puzzle_processed\tactical_valid.txt --validation-fraction 0.1 --limit 200000 --min-agent-moves 2 --max-agent-moves 4 --min-rating 800 --max-rating 2200 --seed 0
+```
+
+기본 theme는 `mateIn2`, `mateIn3`, `fork`, `pin`, `skewer`, `sacrifice`, `discoveredAttack`, `deflection`, `attraction`, `clearance`, `intermezzo`, `trappedPiece`, `xRayAttack`입니다.
+다른 theme를 직접 지정하려면 `--themes`를 붙입니다.
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.utils.extract_tactical_puzzles data\puzzles\lichess_db_puzzle.csv.zst --train-output data\puzzle_processed\tactical_train_mate.txt --validation-output data\puzzle_processed\tactical_valid_mate.txt --themes mateIn2 mateIn3 mateIn4 --min-agent-moves 2 --limit 100000 --seed 0
+```
+
 ## 랜덤 기준선 평가
 
 학습 전에는 랜덤 agent를 평가해서 환경과 action mask가 정상인지 확인합니다.
@@ -89,7 +116,7 @@ mate-in-1 퍼즐은 정답 수가 있는 문제이므로, reward만 보고 맞�
 여기서 supervised learning은 최종 목표가 아니라, RL이 랜덤 policy에서 시작하지 않도록 초기 policy를 만들어주는 역할입니다.
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.train_mate_in_one_supervised --puzzles-file data\puzzle_processed\mate_in_one_train.txt --validation-file data\puzzle_processed\mate_in_one_valid.txt --epochs 20 --batch-size 512 --hidden-size 512 --learning-rate 0.001 --device cuda --save-path tmp\mate_in_one_supervised.pt --checkpoint-path tmp\mate_in_one_supervised_checkpoint.pt --checkpoint-every 1
+.\.venv\Scripts\python -m chess_agent.rl.train_mate_in_one_supervised --puzzles-file data\puzzle_processed\mate_in_one_train.txt --validation-file data\puzzle_processed\mate_in_one_valid.txt --epochs 20 --batch-size 512 --hidden-size 512 --learning-rate 0.001 --device cuda --save-path tmp\mate_in_one_supervised.pt --checkpoint-path tmp\mate_in_one_supervised_checkpoint.pt --checkpoint-every 1 --best-checkpoint-path tmp\mate_in_one_supervised_best.pt
 ```
 
 저장한 supervised policy를 validation 파일에서 평가합니다.
@@ -118,8 +145,34 @@ supervised로 80% 이상까지 올린 모델을 이 방식으로 오래 돌리�
 `--epochs`와 `--episodes`는 추가로 돌릴 양이 아니라 도달할 총량입니다.
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.train_mate_in_one_supervised --puzzles-file data\puzzle_processed\mate_in_one_train.txt --validation-file data\puzzle_processed\mate_in_one_valid.txt --epochs 50 --batch-size 512 --hidden-size 512 --learning-rate 0.001 --device cuda --save-path tmp\mate_in_one_supervised.pt --checkpoint-path tmp\mate_in_one_supervised_checkpoint.pt --checkpoint-every 1 --resume-from tmp\mate_in_one_supervised_checkpoint.pt
+.\.venv\Scripts\python -m chess_agent.rl.train_mate_in_one_supervised --puzzles-file data\puzzle_processed\mate_in_one_train.txt --validation-file data\puzzle_processed\mate_in_one_valid.txt --epochs 50 --batch-size 512 --hidden-size 512 --learning-rate 0.001 --device cuda --save-path tmp\mate_in_one_supervised.pt --checkpoint-path tmp\mate_in_one_supervised_checkpoint.pt --checkpoint-every 1 --best-checkpoint-path tmp\mate_in_one_supervised_best.pt --resume-from tmp\mate_in_one_supervised_checkpoint.pt
 ```
+
+## Tactical Supervised 학습
+
+일주일 동안 서버에서 오래 돌릴 후보로는 현재 이 흐름이 가장 좋습니다.
+mate-in-1보다 어렵고, 여러 수짜리 sequence를 따라가야 하므로 더 의미 있는 representation을 배울 가능성이 큽니다.
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.train_tactical_supervised --puzzles-file data\puzzle_processed\tactical_train.txt --validation-file data\puzzle_processed\tactical_valid.txt --epochs 500 --batch-size 1024 --hidden-size 512 --learning-rate 0.0003 --evaluation-episodes 10000 --device cuda --save-path tmp\tactical_supervised.pt --checkpoint-path tmp\tactical_supervised_checkpoint.pt --checkpoint-every 1 --best-checkpoint-path tmp\tactical_supervised_best.pt
+```
+
+중간부터 이어서 돌릴 때:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.train_tactical_supervised --puzzles-file data\puzzle_processed\tactical_train.txt --validation-file data\puzzle_processed\tactical_valid.txt --epochs 1000 --batch-size 1024 --hidden-size 512 --learning-rate 0.0003 --evaluation-episodes 10000 --device cuda --save-path tmp\tactical_supervised.pt --checkpoint-path tmp\tactical_supervised_checkpoint.pt --checkpoint-every 1 --best-checkpoint-path tmp\tactical_supervised_best.pt --resume-from tmp\tactical_supervised_checkpoint.pt
+```
+
+학습한 tactical policy를 평가하려면:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp\tactical_supervised_best.pt --puzzles-file data\puzzle_processed\tactical_valid.txt --episodes 10000 --device cuda
+```
+
+`Validation accuracy`는 각 agent turn에서 정답 수를 맞힌 비율이고, `Validation puzzle success`는 한 퍼즐의 sequence를 끝까지 모두 맞힌 비율입니다.
+여러 수를 연속으로 맞혀야 하므로 puzzle success는 move accuracy보다 훨씬 낮게 나오는 것이 자연스럽습니다.
+학습 로그에는 `best_val_acc`와 `best_epoch`가 계속 출력됩니다.
+`--save-path`는 마지막 epoch 모델이고, `--best-checkpoint-path`는 validation accuracy가 가장 좋았던 epoch의 모델입니다.
 
 ## GPU/CUDA 사용
 
@@ -167,8 +220,7 @@ CUDA 빌드 PyTorch가 필요하면 아래 보조 requirements 중 서버 환경
 
 일주일 동안 서버에 걸어둘 작업으로는 현재 코드 기준에서 `mate-in-1` supervised 대규모 학습이 가장 안정적입니다.
 다만 이 작업만으로 full chess agent가 되지는 않습니다.
-다음 장기 실험 후보는 Lichess puzzle의 `mateIn2`, `mateIn3`, `fork`, `pin`, `skewer`, `sacrifice` 같은 tactical theme를 다루는 multi-step puzzle 환경입니다.
-이 경우 정답 sequence를 따라 여러 수를 두는 Gymnasium 환경을 새로 만들어야 합니다.
+이제 다음 장기 실험 후보로 Lichess puzzle의 `mateIn2`, `mateIn3`, `fork`, `pin`, `skewer`, `sacrifice` 같은 tactical theme를 다루는 multi-step puzzle 환경도 사용할 수 있습니다.
 
 ## 기본 퍼즐
 
@@ -181,6 +233,12 @@ RL 관련 테스트만 돌리려면:
 
 ```powershell
 .\.venv\Scripts\python -m pytest tests/test_rl_actions.py tests/test_rl_mate_in_one_env.py tests/test_rl_random_baseline.py tests/test_rl_policy.py tests/test_rl_extract_mate_in_one_puzzles.py tests/test_rl_supervised_training.py
+```
+
+tactical puzzle 관련 테스트만 돌리려면:
+
+```powershell
+.\.venv\Scripts\python -m pytest tests/test_rl_tactical_puzzle_env.py tests/test_rl_extract_tactical_puzzles.py tests/test_rl_tactical_supervised_training.py
 ```
 
 전체 테스트:
@@ -198,6 +256,8 @@ RL 관련 테스트만 돌리려면:
 3. `policy.py`
 4. `train_mate_in_one_supervised.py`
 5. `train_mate_in_one.py`
+6. `tactical_puzzle_env.py`
+7. `train_tactical_supervised.py`
 
 `train_mate_in_one_supervised.py`에서는 정답 move를 cross entropy loss로 맞히고, `train_mate_in_one.py`에서는 아래 한 줄이 policy-gradient의 핵심입니다.
 

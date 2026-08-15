@@ -6,8 +6,9 @@ from typing import Sequence
 import chess
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset, Subset, random_split
+from torch.utils.data import DataLoader, Dataset
 
+from chess_agent.rl.actions import legal_action_mask, move_to_action
 from chess_agent.rl.checkpoints import (
     load_training_checkpoint,
     move_optimizer_state_to_device,
@@ -15,26 +16,30 @@ from chess_agent.rl.checkpoints import (
     restore_rng_state,
     save_training_checkpoint,
 )
-from chess_agent.rl.actions import move_to_action, legal_action_mask
-from chess_agent.rl.mate_in_one_env import ChessMateInOneEnv, is_mate_after_move
+from chess_agent.rl.evaluate_tactical import evaluate_tactical_policy
 from chess_agent.rl.observations import board_to_observation
 from chess_agent.rl.policy import MateInOnePolicy, apply_action_mask
-from chess_agent.rl.train_mate_in_one import evaluate_policy, load_policy, save_policy
+from chess_agent.rl.tactical_puzzle_env import TacticalPuzzle, TacticalPuzzleEnv, load_tactical_puzzles
+from chess_agent.rl.train_mate_in_one import load_policy, save_policy
+from chess_agent.rl.train_mate_in_one_supervised import AccuracyResult, evaluate_labeled_accuracy
 
 
-SUPERVISED_CHECKPOINT_KIND = "mate_in_one_supervised"
+TACTICAL_SUPERVISED_CHECKPOINT_KIND = "tactical_supervised"
 
 
 @dataclass(frozen=True)
-class LabeledPuzzle:
+class TacticalTrainingSample:
     fen: str
-    solution_uci: str
+    target_uci: str
     target_action: int
+    puzzle_index: int
+    line_index: int
     rating: int | None = None
+    themes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
-class SupervisedTrainingConfig:
+class TacticalSupervisedTrainingConfig:
     puzzles_file: Path
     validation_file: Path | None = None
     epochs: int = 5
@@ -46,6 +51,7 @@ class SupervisedTrainingConfig:
     device: str = "cpu"
     max_puzzles: int | None = None
     log_every: int = 1
+    evaluation_episodes: int | None = None
     save_path: Path | None = None
     load_path: Path | None = None
     checkpoint_path: Path | None = None
@@ -55,47 +61,35 @@ class SupervisedTrainingConfig:
 
 
 @dataclass(frozen=True)
-class AccuracyResult:
-    correct: int
-    total: int
-    average_loss: float
-
-    @property
-    def accuracy(self) -> float:
-        if self.total == 0:
-            return 0.0
-        return self.correct / self.total
-
-
-@dataclass(frozen=True)
-class SupervisedTrainingResult:
+class TacticalSupervisedTrainingResult:
     train_accuracy: AccuracyResult
     validation_accuracy: AccuracyResult
-    validation_mate_success_rate: float
+    validation_puzzle_success_rate: float
+    validation_move_accuracy: float
     best_validation_accuracy: float
     best_epoch: int | None
 
 
-class MateInOneDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
-    def __init__(self, puzzles: Sequence[LabeledPuzzle]) -> None:
-        self.puzzles = tuple(puzzles)
+class TacticalSampleDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
+    def __init__(self, samples: Sequence[TacticalTrainingSample]) -> None:
+        self.samples = tuple(samples)
 
     def __len__(self) -> int:
-        return len(self.puzzles)
+        return len(self.samples)
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        puzzle = self.puzzles[index]
-        board = chess.Board(puzzle.fen)
+        sample = self.samples[index]
+        board = chess.Board(sample.fen)
         return (
             torch.as_tensor(board_to_observation(board), dtype=torch.float32),
             torch.as_tensor(legal_action_mask(board), dtype=torch.bool),
-            torch.tensor(puzzle.target_action, dtype=torch.long),
+            torch.tensor(sample.target_action, dtype=torch.long),
         )
 
 
-def train_supervised_policy(
-    config: SupervisedTrainingConfig,
-) -> tuple[MateInOnePolicy, SupervisedTrainingResult]:
+def train_tactical_supervised_policy(
+    config: TacticalSupervisedTrainingConfig,
+) -> tuple[MateInOnePolicy, TacticalSupervisedTrainingResult]:
     if config.epochs < 0:
         raise ValueError("epochs must be non-negative")
     if config.batch_size < 1:
@@ -111,14 +105,20 @@ def train_supervised_policy(
 
     torch.manual_seed(config.seed)
     device = torch.device(config.device)
-    puzzles = load_labeled_puzzles(config.puzzles_file, limit=config.max_puzzles)
-    dataset = MateInOneDataset(puzzles)
-    train_dataset, validation_dataset = make_train_validation_datasets(
-        train_dataset=dataset,
+    source_puzzles = load_tactical_puzzles(config.puzzles_file)
+    if config.max_puzzles is not None:
+        if config.max_puzzles < 0:
+            raise ValueError("max_puzzles must be non-negative")
+        source_puzzles = source_puzzles[: config.max_puzzles]
+
+    train_puzzles, validation_puzzles = make_train_validation_puzzles(
+        train_puzzles=source_puzzles,
         validation_file=config.validation_file,
         train_fraction=config.train_fraction,
         seed=config.seed,
     )
+    train_dataset = TacticalSampleDataset(samples_from_puzzles(train_puzzles))
+    validation_dataset = TacticalSampleDataset(samples_from_puzzles(validation_puzzles))
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
@@ -132,7 +132,7 @@ def train_supervised_policy(
     if config.resume_from is not None:
         checkpoint = load_training_checkpoint(
             config.resume_from,
-            expected_kind=SUPERVISED_CHECKPOINT_KIND,
+            expected_kind=TACTICAL_SUPERVISED_CHECKPOINT_KIND,
         )
         policy = policy_from_checkpoint(checkpoint, device=device)
         optimizer = torch.optim.Adam(policy.parameters(), lr=config.learning_rate)
@@ -193,7 +193,7 @@ def train_supervised_policy(
                 best_validation_accuracy = validation_accuracy.accuracy
                 best_epoch = epoch
                 if config.best_checkpoint_path is not None:
-                    save_supervised_checkpoint(
+                    save_tactical_supervised_checkpoint(
                         config.best_checkpoint_path,
                         policy=policy,
                         optimizer=optimizer,
@@ -213,12 +213,13 @@ def train_supervised_policy(
                     f"best_epoch={format_best_epoch(best_epoch)}",
                     flush=True,
                 )
+
         if should_save_checkpoint(
             checkpoint_path=config.checkpoint_path,
             checkpoint_every=config.checkpoint_every,
             step=epoch,
         ):
-            save_supervised_checkpoint(
+            save_tactical_supervised_checkpoint(
                 config.checkpoint_path,
                 policy=policy,
                 optimizer=optimizer,
@@ -243,7 +244,7 @@ def train_supervised_policy(
         best_validation_accuracy = validation_accuracy.accuracy
         best_epoch = config.epochs
         if config.best_checkpoint_path is not None:
-            save_supervised_checkpoint(
+            save_tactical_supervised_checkpoint(
                 config.best_checkpoint_path,
                 policy=policy,
                 optimizer=optimizer,
@@ -251,16 +252,17 @@ def train_supervised_policy(
                 best_validation_accuracy=best_validation_accuracy,
                 best_epoch=best_epoch,
             )
-    validation_mate_success = evaluate_validation_mate_success(
+    validation_success_rate, validation_move_accuracy = evaluate_validation_puzzles(
         policy=policy,
-        dataset=validation_dataset,
+        puzzles=validation_puzzles,
+        episodes=config.evaluation_episodes,
         device=device,
     )
 
     if config.save_path is not None:
         save_policy(policy, config.save_path)
     if config.checkpoint_path is not None:
-        save_supervised_checkpoint(
+        save_tactical_supervised_checkpoint(
             config.checkpoint_path,
             policy=policy,
             optimizer=optimizer,
@@ -269,13 +271,83 @@ def train_supervised_policy(
             best_epoch=best_epoch,
         )
 
-    return policy, SupervisedTrainingResult(
+    return policy, TacticalSupervisedTrainingResult(
         train_accuracy=train_accuracy,
         validation_accuracy=validation_accuracy,
-        validation_mate_success_rate=validation_mate_success,
+        validation_puzzle_success_rate=validation_success_rate,
+        validation_move_accuracy=validation_move_accuracy,
         best_validation_accuracy=best_validation_accuracy,
         best_epoch=best_epoch,
     )
+
+
+def make_train_validation_puzzles(
+    *,
+    train_puzzles: Sequence[TacticalPuzzle],
+    validation_file: Path | None,
+    train_fraction: float,
+    seed: int,
+) -> tuple[tuple[TacticalPuzzle, ...], tuple[TacticalPuzzle, ...]]:
+    train_puzzles = tuple(train_puzzles)
+    if validation_file is not None:
+        return train_puzzles, load_tactical_puzzles(validation_file)
+
+    train_size = round(len(train_puzzles) * train_fraction)
+    train_size = min(max(train_size, 1), len(train_puzzles))
+    indices = torch.randperm(
+        len(train_puzzles),
+        generator=torch.Generator().manual_seed(seed),
+    ).tolist()
+    train_indices = set(indices[:train_size])
+    return (
+        tuple(puzzle for index, puzzle in enumerate(train_puzzles) if index in train_indices),
+        tuple(puzzle for index, puzzle in enumerate(train_puzzles) if index not in train_indices),
+    )
+
+
+def samples_from_puzzles(
+    puzzles: Sequence[TacticalPuzzle],
+) -> tuple[TacticalTrainingSample, ...]:
+    samples: list[TacticalTrainingSample] = []
+    for puzzle_index, puzzle in enumerate(puzzles):
+        board = chess.Board(puzzle.initial_fen)
+        for line_index, move_uci in enumerate(puzzle.line_uci):
+            move = chess.Move.from_uci(move_uci)
+            if line_index % 2 == 0:
+                samples.append(
+                    TacticalTrainingSample(
+                        fen=board.fen(),
+                        target_uci=move.uci(),
+                        target_action=move_to_action(move),
+                        puzzle_index=puzzle_index,
+                        line_index=line_index,
+                        rating=puzzle.rating,
+                        themes=puzzle.themes,
+                    )
+                )
+            board.push(move)
+    return tuple(samples)
+
+
+@torch.no_grad()
+def evaluate_validation_puzzles(
+    *,
+    policy: MateInOnePolicy,
+    puzzles: Sequence[TacticalPuzzle],
+    episodes: int | None,
+    device: torch.device,
+) -> tuple[float, float]:
+    if not puzzles:
+        return 0.0, 0.0
+
+    env = TacticalPuzzleEnv(puzzles=puzzles)
+    result = evaluate_tactical_policy(
+        policy=policy,
+        env=env,
+        episodes=episodes if episodes is not None else len(puzzles),
+        device=device,
+    )
+    return result.success_rate, result.move_accuracy
 
 
 def should_save_checkpoint(
@@ -292,7 +364,7 @@ def should_save_checkpoint(
     )
 
 
-def save_supervised_checkpoint(
+def save_tactical_supervised_checkpoint(
     path: str | Path,
     *,
     policy: MateInOnePolicy,
@@ -303,7 +375,7 @@ def save_supervised_checkpoint(
 ) -> Path:
     return save_training_checkpoint(
         path,
-        kind=SUPERVISED_CHECKPOINT_KIND,
+        kind=TACTICAL_SUPERVISED_CHECKPOINT_KIND,
         policy=policy,
         optimizer=optimizer,
         progress={
@@ -316,184 +388,6 @@ def save_supervised_checkpoint(
 
 def format_best_epoch(best_epoch: int | None) -> str:
     return "-" if best_epoch is None else str(best_epoch)
-
-
-def load_labeled_puzzles(path: str | Path, *, limit: int | None = None) -> tuple[LabeledPuzzle, ...]:
-    if limit is not None and limit < 0:
-        raise ValueError("limit must be non-negative")
-
-    puzzles = []
-    for line_number, raw_line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), start=1):
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-
-        puzzles.append(parse_labeled_puzzle_line(line, line_number=line_number))
-        if limit is not None and len(puzzles) >= limit:
-            break
-
-    if not puzzles:
-        raise ValueError(f"no labeled puzzles found in: {path}")
-    return tuple(puzzles)
-
-
-def parse_labeled_puzzle_line(line: str, *, line_number: int) -> LabeledPuzzle:
-    parts = line.split("\t")
-    fen = parts[0].strip()
-    solution_uci = parts[1].strip() if len(parts) >= 2 and parts[1].strip() else None
-    rating = parse_optional_int(parts[2].strip()) if len(parts) >= 3 else None
-
-    try:
-        board = chess.Board(fen)
-    except ValueError as exc:
-        raise ValueError(f"invalid FEN at line {line_number}: {fen}") from exc
-
-    if solution_uci is None:
-        solution = find_first_mate_in_one_move(board)
-    else:
-        try:
-            solution = chess.Move.from_uci(solution_uci)
-        except ValueError as exc:
-            raise ValueError(
-                f"invalid solution UCI at line {line_number}: {solution_uci}"
-            ) from exc
-        validate_solution_move(board, solution, line_number=line_number)
-
-    return LabeledPuzzle(
-        fen=fen,
-        solution_uci=solution.uci(),
-        target_action=move_to_action(solution),
-        rating=rating,
-    )
-
-
-def find_first_mate_in_one_move(board: chess.Board) -> chess.Move:
-    for move in board.legal_moves:
-        if is_mate_after_move(board, move):
-            return move
-    raise ValueError(f"position has no mate-in-one move: {board.fen()}")
-
-
-def validate_solution_move(
-    board: chess.Board,
-    solution: chess.Move,
-    *,
-    line_number: int,
-) -> None:
-    if solution not in board.legal_moves:
-        raise ValueError(f"solution is illegal at line {line_number}: {solution.uci()}")
-    if not is_mate_after_move(board, solution):
-        raise ValueError(
-            f"solution is not checkmate at line {line_number}: {solution.uci()}"
-        )
-
-
-def parse_optional_int(value: str) -> int | None:
-    if not value:
-        return None
-    try:
-        return int(value)
-    except ValueError:
-        return None
-
-
-def split_dataset(
-    dataset: MateInOneDataset,
-    *,
-    train_fraction: float,
-    seed: int,
-) -> tuple[Subset, Subset]:
-    train_size = round(len(dataset) * train_fraction)
-    train_size = min(max(train_size, 1), len(dataset))
-    validation_size = len(dataset) - train_size
-    return random_split(
-        dataset,
-        [train_size, validation_size],
-        generator=torch.Generator().manual_seed(seed),
-    )
-
-
-def make_train_validation_datasets(
-    *,
-    train_dataset: MateInOneDataset,
-    validation_file: Path | None,
-    train_fraction: float,
-    seed: int,
-) -> tuple[Dataset, Dataset]:
-    if validation_file is None:
-        return split_dataset(
-            train_dataset,
-            train_fraction=train_fraction,
-            seed=seed,
-        )
-
-    validation_dataset = MateInOneDataset(load_labeled_puzzles(validation_file))
-    return train_dataset, validation_dataset
-
-
-@torch.no_grad()
-def evaluate_labeled_accuracy(
-    *,
-    policy: MateInOnePolicy,
-    dataset: Dataset,
-    batch_size: int,
-    device: torch.device,
-) -> AccuracyResult:
-    if len(dataset) == 0:
-        return AccuracyResult(correct=0, total=0, average_loss=0.0)
-
-    was_training = policy.training
-    policy.eval()
-    loader = DataLoader(dataset, batch_size=batch_size)
-    total = 0
-    correct = 0
-    total_loss = 0.0
-
-    for boards, masks, targets in loader:
-        boards = boards.to(device)
-        masks = masks.to(device)
-        targets = targets.to(device)
-        logits = apply_action_mask(policy(boards), masks)
-        loss = F.cross_entropy(logits, targets, reduction="sum")
-        predictions = torch.argmax(logits, dim=-1)
-
-        total += int(targets.numel())
-        correct += int((predictions == targets).sum().item())
-        total_loss += float(loss.item())
-
-    policy.train(was_training)
-    return AccuracyResult(
-        correct=correct,
-        total=total,
-        average_loss=total_loss / total,
-    )
-
-
-@torch.no_grad()
-def evaluate_validation_mate_success(
-    *,
-    policy: MateInOnePolicy,
-    dataset: Dataset,
-    device: torch.device,
-) -> float:
-    if len(dataset) == 0:
-        return 0.0
-
-    puzzles = fens_from_dataset(dataset)
-    env = ChessMateInOneEnv(puzzles=puzzles)
-    result = evaluate_policy(
-        policy=policy,
-        env=env,
-        episodes=len(puzzles),
-        device=device,
-    )
-    return result.success_rate
-
-
-def fens_from_dataset(dataset: Dataset) -> list[str]:
-    if isinstance(dataset, Subset):
-        return [dataset.dataset.puzzles[index].fen for index in dataset.indices]
-    return [puzzle.fen for puzzle in dataset.puzzles]
 
 
 def main() -> None:
@@ -509,6 +403,7 @@ def main() -> None:
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--max-puzzles", type=int)
     parser.add_argument("--log-every", type=int, default=1)
+    parser.add_argument("--evaluation-episodes", type=int)
     parser.add_argument("--save-path", type=Path)
     parser.add_argument("--load-path", type=Path)
     parser.add_argument("--checkpoint-path", type=Path)
@@ -517,8 +412,8 @@ def main() -> None:
     parser.add_argument("--resume-from", type=Path)
     args = parser.parse_args()
 
-    _, result = train_supervised_policy(
-        SupervisedTrainingConfig(
+    _, result = train_tactical_supervised_policy(
+        TacticalSupervisedTrainingConfig(
             puzzles_file=args.puzzles_file,
             validation_file=args.validation_file,
             epochs=args.epochs,
@@ -530,6 +425,7 @@ def main() -> None:
             device=args.device,
             max_puzzles=args.max_puzzles,
             log_every=args.log_every,
+            evaluation_episodes=args.evaluation_episodes,
             save_path=args.save_path,
             load_path=args.load_path,
             checkpoint_path=args.checkpoint_path,
@@ -540,16 +436,17 @@ def main() -> None:
     )
 
     print()
-    print("Supervised training summary")
-    print(f"Train accuracy:          {result.train_accuracy.accuracy:.1%}")
-    print(f"Validation accuracy:     {result.validation_accuracy.accuracy:.1%}")
-    print(f"Validation mate success: {result.validation_mate_success_rate:.1%}")
-    print(f"Best validation accuracy: {result.best_validation_accuracy:.1%}")
-    print(f"Best epoch:              {format_best_epoch(result.best_epoch)}")
+    print("Tactical supervised training summary")
+    print(f"Train accuracy:              {result.train_accuracy.accuracy:.1%}")
+    print(f"Validation accuracy:         {result.validation_accuracy.accuracy:.1%}")
+    print(f"Validation puzzle success:   {result.validation_puzzle_success_rate:.1%}")
+    print(f"Validation move accuracy:    {result.validation_move_accuracy:.1%}")
+    print(f"Best validation accuracy:    {result.best_validation_accuracy:.1%}")
+    print(f"Best epoch:                  {format_best_epoch(result.best_epoch)}")
     if args.save_path is not None:
-        print(f"Saved policy:            {args.save_path}")
+        print(f"Saved policy:                {args.save_path}")
     if args.best_checkpoint_path is not None:
-        print(f"Best checkpoint:         {args.best_checkpoint_path}")
+        print(f"Best checkpoint:             {args.best_checkpoint_path}")
 
 
 if __name__ == "__main__":
