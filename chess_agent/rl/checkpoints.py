@@ -3,14 +3,14 @@ from typing import Any
 
 import torch
 
-from chess_agent.rl.policy import MateInOnePolicy
+from chess_agent.rl.policy import PolicyNetwork, policy_config, policy_from_config
 
 
 def save_training_checkpoint(
     path: str | Path,
     *,
     kind: str,
-    policy: MateInOnePolicy,
+    policy: PolicyNetwork,
     optimizer: torch.optim.Optimizer,
     progress: dict[str, Any],
 ) -> Path:
@@ -20,6 +20,7 @@ def save_training_checkpoint(
         {
             "kind": kind,
             "hidden_size": policy.hidden_size,
+            "policy_config": policy_config(policy),
             "state_dict": policy.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "progress": progress,
@@ -45,8 +46,11 @@ def policy_from_checkpoint(
     checkpoint: dict[str, Any],
     *,
     device: torch.device,
-) -> MateInOnePolicy:
-    policy = MateInOnePolicy(hidden_size=int(checkpoint["hidden_size"]))
+) -> PolicyNetwork:
+    config = checkpoint.get("policy_config")
+    if not isinstance(config, dict):
+        config = {"architecture": "mlp", "hidden_size": checkpoint["hidden_size"]}
+    policy = policy_from_config(config)
     policy.load_state_dict(checkpoint["state_dict"])
     return policy.to(device)
 

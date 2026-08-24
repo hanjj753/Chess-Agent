@@ -33,8 +33,26 @@ Gymnasium 환경
 
 프로젝트 루트에서 실행합니다.
 
+Windows PowerShell:
+
 ```powershell
 .\.venv\Scripts\python -m pip install -r requirements.txt
+```
+
+Linux:
+
+```bash
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+가상환경을 활성화한 뒤에는 두 운영체제 모두 `python -m ...` 형식으로 실행할 수도 있습니다.
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+```bash
+source .venv/bin/activate
 ```
 
 현재 필요한 주요 패키지는 다음과 같습니다.
@@ -152,27 +170,58 @@ supervised로 80% 이상까지 올린 모델을 이 방식으로 오래 돌리�
 
 일주일 동안 서버에서 오래 돌릴 후보로는 현재 이 흐름이 가장 좋습니다.
 mate-in-1보다 어렵고, 여러 수짜리 sequence를 따라가야 하므로 더 의미 있는 representation을 배울 가능성이 큽니다.
+기본 policy는 체스판의 공간 관계를 보존하는 CNN이며, `AdamW`, weight decay, dropout을 사용합니다.
+validation accuracy가 `--patience` 동안 개선되지 않으면 최대 epoch에 도달하기 전이라도 자동으로 종료합니다.
+
+Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.train_tactical_supervised --puzzles-file data\puzzle_processed\tactical_train.txt --validation-file data\puzzle_processed\tactical_valid.txt --epochs 500 --batch-size 1024 --hidden-size 512 --learning-rate 0.0003 --evaluation-episodes 10000 --device cuda --save-path tmp\tactical_supervised.pt --checkpoint-path tmp\tactical_supervised_checkpoint.pt --checkpoint-every 1 --best-checkpoint-path tmp\tactical_supervised_best.pt
+.\.venv\Scripts\python -m chess_agent.rl.train_tactical_supervised --puzzles-file data\puzzle_processed\tactical_train.txt --validation-file data\puzzle_processed\tactical_valid.txt --epochs 500 --batch-size 256 --architecture cnn --hidden-size 64 --residual-blocks 3 --dropout 0.1 --learning-rate 0.0003 --weight-decay 0.0001 --patience 15 --evaluation-episodes 10000 --device cuda --save-path tmp\tactical_supervised_cnn.pt --checkpoint-path tmp\tactical_supervised_cnn_checkpoint.pt --checkpoint-every 1 --best-checkpoint-path tmp\tactical_supervised_cnn_best.pt
 ```
 
-중간부터 이어서 돌릴 때:
+Linux:
 
-```powershell
-.\.venv\Scripts\python -m chess_agent.rl.train_tactical_supervised --puzzles-file data\puzzle_processed\tactical_train.txt --validation-file data\puzzle_processed\tactical_valid.txt --epochs 1000 --batch-size 1024 --hidden-size 512 --learning-rate 0.0003 --evaluation-episodes 10000 --device cuda --save-path tmp\tactical_supervised.pt --checkpoint-path tmp\tactical_supervised_checkpoint.pt --checkpoint-every 1 --best-checkpoint-path tmp\tactical_supervised_best.pt --resume-from tmp\tactical_supervised_checkpoint.pt
+```bash
+python -m chess_agent.rl.train_tactical_supervised --puzzles-file data/puzzle_processed/tactical_train.txt --validation-file data/puzzle_processed/tactical_valid.txt --epochs 500 --batch-size 256 --architecture cnn --hidden-size 64 --residual-blocks 3 --dropout 0.1 --learning-rate 0.0003 --weight-decay 0.0001 --patience 15 --evaluation-episodes 10000 --device cuda --save-path tmp/tactical_supervised_cnn.pt --checkpoint-path tmp/tactical_supervised_cnn_checkpoint.pt --checkpoint-every 1 --best-checkpoint-path tmp/tactical_supervised_cnn_best.pt
 ```
 
-학습한 tactical policy를 평가하려면:
+`--hidden-size`는 CNN에서는 fully connected layer 크기가 아니라 channel 수입니다.
+GPU 메모리가 충분하면 `--batch-size 512`, 부족하면 `128`로 조절합니다.
+조기 종료를 끄려면 `--patience 0`을 사용합니다.
+
+서버 중단 등으로 checkpoint에서 이어서 돌릴 때 `--epochs`는 추가 epoch가 아니라 도달할 총 epoch입니다.
+
+Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp\tactical_supervised_best.pt --puzzles-file data\puzzle_processed\tactical_valid.txt --episodes 10000 --device cuda
+.\.venv\Scripts\python -m chess_agent.rl.train_tactical_supervised --puzzles-file data\puzzle_processed\tactical_train.txt --validation-file data\puzzle_processed\tactical_valid.txt --epochs 500 --batch-size 256 --device cuda --save-path tmp\tactical_supervised_cnn.pt --checkpoint-path tmp\tactical_supervised_cnn_checkpoint.pt --checkpoint-every 1 --best-checkpoint-path tmp\tactical_supervised_cnn_best.pt --resume-from tmp\tactical_supervised_cnn_checkpoint.pt
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.train_tactical_supervised --puzzles-file data/puzzle_processed/tactical_train.txt --validation-file data/puzzle_processed/tactical_valid.txt --epochs 500 --batch-size 256 --device cuda --save-path tmp/tactical_supervised_cnn.pt --checkpoint-path tmp/tactical_supervised_cnn_checkpoint.pt --checkpoint-every 1 --best-checkpoint-path tmp/tactical_supervised_cnn_best.pt --resume-from tmp/tactical_supervised_cnn_checkpoint.pt
+```
+
+학습한 best tactical policy를 평가하려면:
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp\tactical_supervised_cnn_best.pt --puzzles-file data\puzzle_processed\tactical_valid.txt --episodes 10000 --device cuda
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp/tactical_supervised_cnn_best.pt --puzzles-file data/puzzle_processed/tactical_valid.txt --episodes 10000 --device cuda
 ```
 
 `Validation accuracy`는 각 agent turn에서 정답 수를 맞힌 비율이고, `Validation puzzle success`는 한 퍼즐의 sequence를 끝까지 모두 맞힌 비율입니다.
 여러 수를 연속으로 맞혀야 하므로 puzzle success는 move accuracy보다 훨씬 낮게 나오는 것이 자연스럽습니다.
 학습 로그에는 `best_val_acc`와 `best_epoch`가 계속 출력됩니다.
 `--save-path`는 마지막 epoch 모델이고, `--best-checkpoint-path`는 validation accuracy가 가장 좋았던 epoch의 모델입니다.
+기존 MLP checkpoint는 계속 불러오고 평가할 수 있지만 CNN으로 변환되지는 않습니다. CNN 학습은 위 명령처럼 새 파일명으로 시작합니다.
 
 ## GPU/CUDA 사용
 
@@ -214,7 +263,7 @@ CUDA 빌드 PyTorch가 필요하면 아래 보조 requirements 중 서버 환경
 1. 먼저 `--limit 100000`으로 추출해서 전체 파이프라인을 확인합니다.
 2. supervised 사전훈련을 `20~50` epochs 정도 돌립니다.
 3. validation accuracy와 mate success가 충분히 오르는지 확인합니다.
-4. 서버에서는 `--limit 200000~500000`, `--hidden-size 512`, `--batch-size 512~2048` 범위로 늘려봅니다.
+4. 서버에서는 `--limit 200000~500000`으로 데이터를 늘립니다. MLP는 `--hidden-size 512`, CNN은 `--hidden-size 64~128` 정도가 출발점입니다.
 5. checkpoint를 켠 상태로 supervised 학습을 길게 돌립니다.
 6. RL fine-tuning은 작은 learning rate로 짧게 붙이고, 성능이 내려가면 멈춥니다.
 

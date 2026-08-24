@@ -29,7 +29,9 @@ def test_tactical_supervised_training_runs_and_saves_policy(tmp_path: Path) -> N
             validation_file=validation_path,
             epochs=1,
             batch_size=2,
+            architecture="mlp",
             hidden_size=16,
+            dropout=0.0,
             log_every=0,
             save_path=save_path,
             best_checkpoint_path=best_path,
@@ -54,7 +56,9 @@ def test_tactical_supervised_training_can_resume_from_checkpoint(tmp_path: Path)
             validation_file=validation_path,
             epochs=1,
             batch_size=2,
+            architecture="mlp",
             hidden_size=16,
+            dropout=0.0,
             log_every=0,
             checkpoint_path=checkpoint_path,
             checkpoint_every=1,
@@ -66,7 +70,9 @@ def test_tactical_supervised_training_can_resume_from_checkpoint(tmp_path: Path)
             validation_file=validation_path,
             epochs=2,
             batch_size=2,
+            architecture="mlp",
             hidden_size=16,
+            dropout=0.0,
             log_every=0,
             checkpoint_path=checkpoint_path,
             checkpoint_every=1,
@@ -76,6 +82,34 @@ def test_tactical_supervised_training_can_resume_from_checkpoint(tmp_path: Path)
 
     assert checkpoint_path.exists()
     assert result.train_accuracy.total == 2
+
+
+def test_tactical_supervised_training_stops_after_patience(tmp_path: Path) -> None:
+    puzzles_path = write_tactical_file(tmp_path, "train.txt", [make_tactical_puzzle()])
+    validation_path = write_tactical_file(
+        tmp_path,
+        "valid.txt",
+        [make_second_tactical_puzzle()],
+    )
+
+    _, result = train_tactical_supervised_policy(
+        TacticalSupervisedTrainingConfig(
+            puzzles_file=puzzles_path,
+            validation_file=validation_path,
+            epochs=5,
+            batch_size=2,
+            learning_rate=0.0,
+            architecture="mlp",
+            hidden_size=16,
+            dropout=0.0,
+            early_stopping_patience=1,
+            log_every=0,
+        )
+    )
+
+    assert result.stopped_early
+    assert result.completed_epochs == 2
+    assert result.best_epoch == 1
 
 
 def write_tactical_file(

@@ -18,7 +18,12 @@ from chess_agent.rl.checkpoints import (
 )
 from chess_agent.rl.evaluate_tactical import evaluate_tactical_policy
 from chess_agent.rl.observations import board_to_observation
-from chess_agent.rl.policy import MateInOnePolicy, apply_action_mask
+from chess_agent.rl.policy import (
+    POLICY_ARCHITECTURES,
+    PolicyNetwork,
+    apply_action_mask,
+    create_policy,
+)
 from chess_agent.rl.tactical_puzzle_env import TacticalPuzzle, TacticalPuzzleEnv, load_tactical_puzzles
 from chess_agent.rl.train_mate_in_one import load_policy, save_policy
 from chess_agent.rl.train_mate_in_one_supervised import AccuracyResult, evaluate_labeled_accuracy
@@ -45,7 +50,13 @@ class TacticalSupervisedTrainingConfig:
     epochs: int = 5
     batch_size: int = 256
     learning_rate: float = 1e-3
-    hidden_size: int = 256
+    architecture: str = "cnn"
+    hidden_size: int = 64
+    dropout: float = 0.1
+    residual_blocks: int = 3
+    weight_decay: float = 1e-4
+    early_stopping_patience: int | None = 15
+    early_stopping_min_delta: float = 0.0
     train_fraction: float = 0.9
     seed: int = 0
     device: str = "cpu"
@@ -68,6 +79,8 @@ class TacticalSupervisedTrainingResult:
     validation_move_accuracy: float
     best_validation_accuracy: float
     best_epoch: int | None
+    completed_epochs: int
+    stopped_early: bool
 
 
 class TacticalSampleDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
@@ -89,7 +102,7 @@ class TacticalSampleDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tens
 
 def train_tactical_supervised_policy(
     config: TacticalSupervisedTrainingConfig,
-) -> tuple[MateInOnePolicy, TacticalSupervisedTrainingResult]:
+) -> tuple[PolicyNetwork, TacticalSupervisedTrainingResult]:
     if config.epochs < 0:
         raise ValueError("epochs must be non-negative")
     if config.batch_size < 1:
@@ -102,6 +115,14 @@ def train_tactical_supervised_policy(
         raise ValueError("checkpoint_path is required when checkpoint_every is set")
     if config.resume_from is not None and config.load_path is not None:
         raise ValueError("use resume_from or load_path, not both")
+    if config.architecture not in POLICY_ARCHITECTURES:
+        raise ValueError(f"unsupported policy architecture: {config.architecture}")
+    if config.weight_decay < 0:
+        raise ValueError("weight_decay must be non-negative")
+    if config.early_stopping_patience is not None and config.early_stopping_patience < 1:
+        raise ValueError("early_stopping_patience must be positive or None")
+    if config.early_stopping_min_delta < 0:
+        raise ValueError("early_stopping_min_delta must be non-negative")
 
     torch.manual_seed(config.seed)
     device = torch.device(config.device)
@@ -119,6 +140,8 @@ def train_tactical_supervised_policy(
     )
     train_dataset = TacticalSampleDataset(samples_from_puzzles(train_puzzles))
     validation_dataset = TacticalSampleDataset(samples_from_puzzles(validation_puzzles))
+    if config.early_stopping_patience is not None and len(validation_dataset) == 0:
+        raise ValueError("validation puzzles are required for early stopping")
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
@@ -129,13 +152,18 @@ def train_tactical_supervised_policy(
     completed_epochs = 0
     best_validation_accuracy = -1.0
     best_epoch: int | None = None
+    epochs_without_improvement = 0
     if config.resume_from is not None:
         checkpoint = load_training_checkpoint(
             config.resume_from,
             expected_kind=TACTICAL_SUPERVISED_CHECKPOINT_KIND,
         )
         policy = policy_from_checkpoint(checkpoint, device=device)
-        optimizer = torch.optim.Adam(policy.parameters(), lr=config.learning_rate)
+        optimizer = torch.optim.AdamW(
+            policy.parameters(),
+            lr=config.learning_rate,
+            weight_decay=config.weight_decay,
+        )
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         move_optimizer_state_to_device(optimizer, device)
         restore_rng_state(checkpoint, device=device)
@@ -144,6 +172,9 @@ def train_tactical_supervised_policy(
         best_validation_accuracy = float(progress.get("best_validation_accuracy", -1.0))
         raw_best_epoch = progress.get("best_epoch")
         best_epoch = int(raw_best_epoch) if raw_best_epoch is not None else None
+        epochs_without_improvement = int(
+            progress.get("epochs_without_improvement", 0)
+        )
         if completed_epochs > config.epochs:
             raise ValueError(
                 "checkpoint has already completed more epochs than requested"
@@ -152,10 +183,21 @@ def train_tactical_supervised_policy(
         policy = (
             load_policy(config.load_path, device=device)
             if config.load_path is not None
-            else MateInOnePolicy(hidden_size=config.hidden_size).to(device)
+            else create_policy(
+                architecture=config.architecture,
+                hidden_size=config.hidden_size,
+                dropout=config.dropout,
+                residual_blocks=config.residual_blocks,
+            ).to(device)
         )
-        optimizer = torch.optim.Adam(policy.parameters(), lr=config.learning_rate)
+        optimizer = torch.optim.AdamW(
+            policy.parameters(),
+            lr=config.learning_rate,
+            weight_decay=config.weight_decay,
+        )
 
+    stopped_early = False
+    last_completed_epoch = completed_epochs
     for epoch in range(completed_epochs + 1, config.epochs + 1):
         policy.train()
         for boards, masks, targets in train_loader:
@@ -173,8 +215,11 @@ def train_tactical_supervised_policy(
         train_accuracy = None
         validation_accuracy = None
         should_log = bool(config.log_every and epoch % config.log_every == 0)
-        should_track_best = config.best_checkpoint_path is not None
-        if should_log or should_track_best:
+        should_track_validation = (
+            config.best_checkpoint_path is not None
+            or config.early_stopping_patience is not None
+        )
+        if should_log or should_track_validation:
             if should_log:
                 train_accuracy = evaluate_labeled_accuracy(
                     policy=policy,
@@ -189,9 +234,14 @@ def train_tactical_supervised_policy(
                 device=device,
             )
 
-            if validation_accuracy.accuracy > best_validation_accuracy:
+            improved = (
+                validation_accuracy.accuracy
+                > best_validation_accuracy + config.early_stopping_min_delta
+            )
+            if improved:
                 best_validation_accuracy = validation_accuracy.accuracy
                 best_epoch = epoch
+                epochs_without_improvement = 0
                 if config.best_checkpoint_path is not None:
                     save_tactical_supervised_checkpoint(
                         config.best_checkpoint_path,
@@ -200,7 +250,10 @@ def train_tactical_supervised_policy(
                         completed_epochs=epoch,
                         best_validation_accuracy=best_validation_accuracy,
                         best_epoch=best_epoch,
+                        epochs_without_improvement=epochs_without_improvement,
                     )
+            else:
+                epochs_without_improvement += 1
 
             if should_log and train_accuracy is not None:
                 print(
@@ -214,6 +267,7 @@ def train_tactical_supervised_policy(
                     flush=True,
                 )
 
+        last_completed_epoch = epoch
         if should_save_checkpoint(
             checkpoint_path=config.checkpoint_path,
             checkpoint_every=config.checkpoint_every,
@@ -226,7 +280,22 @@ def train_tactical_supervised_policy(
                 completed_epochs=epoch,
                 best_validation_accuracy=best_validation_accuracy,
                 best_epoch=best_epoch,
+                epochs_without_improvement=epochs_without_improvement,
             )
+
+        if (
+            config.early_stopping_patience is not None
+            and epochs_without_improvement >= config.early_stopping_patience
+        ):
+            stopped_early = True
+            print(
+                f"Early stopping at epoch {epoch}: "
+                f"validation accuracy did not improve for "
+                f"{config.early_stopping_patience} epochs "
+                f"(best epoch: {format_best_epoch(best_epoch)}).",
+                flush=True,
+            )
+            break
 
     train_accuracy = evaluate_labeled_accuracy(
         policy=policy,
@@ -240,17 +309,21 @@ def train_tactical_supervised_policy(
         batch_size=config.batch_size,
         device=device,
     )
-    if validation_accuracy.accuracy > best_validation_accuracy:
+    if (
+        validation_accuracy.accuracy
+        > best_validation_accuracy + config.early_stopping_min_delta
+    ):
         best_validation_accuracy = validation_accuracy.accuracy
-        best_epoch = config.epochs
+        best_epoch = last_completed_epoch
         if config.best_checkpoint_path is not None:
             save_tactical_supervised_checkpoint(
                 config.best_checkpoint_path,
                 policy=policy,
                 optimizer=optimizer,
-                completed_epochs=config.epochs,
+                completed_epochs=last_completed_epoch,
                 best_validation_accuracy=best_validation_accuracy,
                 best_epoch=best_epoch,
+                epochs_without_improvement=0,
             )
     validation_success_rate, validation_move_accuracy = evaluate_validation_puzzles(
         policy=policy,
@@ -266,9 +339,10 @@ def train_tactical_supervised_policy(
             config.checkpoint_path,
             policy=policy,
             optimizer=optimizer,
-            completed_epochs=config.epochs,
+            completed_epochs=last_completed_epoch,
             best_validation_accuracy=best_validation_accuracy,
             best_epoch=best_epoch,
+            epochs_without_improvement=epochs_without_improvement,
         )
 
     return policy, TacticalSupervisedTrainingResult(
@@ -278,6 +352,8 @@ def train_tactical_supervised_policy(
         validation_move_accuracy=validation_move_accuracy,
         best_validation_accuracy=best_validation_accuracy,
         best_epoch=best_epoch,
+        completed_epochs=last_completed_epoch,
+        stopped_early=stopped_early,
     )
 
 
@@ -332,7 +408,7 @@ def samples_from_puzzles(
 @torch.no_grad()
 def evaluate_validation_puzzles(
     *,
-    policy: MateInOnePolicy,
+    policy: PolicyNetwork,
     puzzles: Sequence[TacticalPuzzle],
     episodes: int | None,
     device: torch.device,
@@ -367,11 +443,12 @@ def should_save_checkpoint(
 def save_tactical_supervised_checkpoint(
     path: str | Path,
     *,
-    policy: MateInOnePolicy,
+    policy: PolicyNetwork,
     optimizer: torch.optim.Optimizer,
     completed_epochs: int,
     best_validation_accuracy: float = -1.0,
     best_epoch: int | None = None,
+    epochs_without_improvement: int = 0,
 ) -> Path:
     return save_training_checkpoint(
         path,
@@ -382,6 +459,7 @@ def save_tactical_supervised_checkpoint(
             "completed_epochs": completed_epochs,
             "best_validation_accuracy": best_validation_accuracy,
             "best_epoch": best_epoch,
+            "epochs_without_improvement": epochs_without_improvement,
         },
     )
 
@@ -397,7 +475,18 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
-    parser.add_argument("--hidden-size", type=int, default=256)
+    parser.add_argument("--architecture", choices=POLICY_ARCHITECTURES, default="cnn")
+    parser.add_argument("--hidden-size", type=int, default=64)
+    parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument("--residual-blocks", type=int, default=3)
+    parser.add_argument("--weight-decay", type=float, default=1e-4)
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=15,
+        help="early stopping patience; use 0 to disable",
+    )
+    parser.add_argument("--min-delta", type=float, default=0.0)
     parser.add_argument("--train-fraction", type=float, default=0.9)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cpu")
@@ -419,7 +508,13 @@ def main() -> None:
             epochs=args.epochs,
             batch_size=args.batch_size,
             learning_rate=args.learning_rate,
+            architecture=args.architecture,
             hidden_size=args.hidden_size,
+            dropout=args.dropout,
+            residual_blocks=args.residual_blocks,
+            weight_decay=args.weight_decay,
+            early_stopping_patience=None if args.patience == 0 else args.patience,
+            early_stopping_min_delta=args.min_delta,
             train_fraction=args.train_fraction,
             seed=args.seed,
             device=args.device,
@@ -443,6 +538,8 @@ def main() -> None:
     print(f"Validation move accuracy:    {result.validation_move_accuracy:.1%}")
     print(f"Best validation accuracy:    {result.best_validation_accuracy:.1%}")
     print(f"Best epoch:                  {format_best_epoch(result.best_epoch)}")
+    print(f"Completed epochs:             {result.completed_epochs}")
+    print(f"Stopped early:                {'yes' if result.stopped_early else 'no'}")
     if args.save_path is not None:
         print(f"Saved policy:                {args.save_path}")
     if args.best_checkpoint_path is not None:

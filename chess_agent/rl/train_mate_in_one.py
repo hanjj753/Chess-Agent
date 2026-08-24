@@ -13,7 +13,13 @@ from chess_agent.rl.checkpoints import (
     save_training_checkpoint,
 )
 from chess_agent.rl.mate_in_one_env import ChessMateInOneEnv
-from chess_agent.rl.policy import MateInOnePolicy, apply_action_mask
+from chess_agent.rl.policy import (
+    MateInOnePolicy,
+    PolicyNetwork,
+    apply_action_mask,
+    policy_config,
+    policy_from_config,
+)
 from chess_agent.rl.random_baseline import EvaluationResult
 
 
@@ -286,12 +292,13 @@ def masked_logits_for_observation(
     return apply_action_mask(logits, action_mask)
 
 
-def save_policy(policy: MateInOnePolicy, path: str | Path) -> Path:
+def save_policy(policy: PolicyNetwork, path: str | Path) -> Path:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
             "hidden_size": policy.hidden_size,
+            "policy_config": policy_config(policy),
             "state_dict": policy.state_dict(),
         },
         output_path,
@@ -299,10 +306,14 @@ def save_policy(policy: MateInOnePolicy, path: str | Path) -> Path:
     return output_path
 
 
-def load_policy(path: str | Path, device: str | torch.device = "cpu") -> MateInOnePolicy:
+def load_policy(path: str | Path, device: str | torch.device = "cpu") -> PolicyNetwork:
     checkpoint = torch.load(Path(path), map_location=device)
-    policy = MateInOnePolicy(hidden_size=int(checkpoint["hidden_size"]))
+    config = checkpoint.get("policy_config")
+    if not isinstance(config, dict):
+        config = {"architecture": "mlp", "hidden_size": checkpoint["hidden_size"]}
+    policy = policy_from_config(config)
     policy.load_state_dict(checkpoint["state_dict"])
+    policy.to(device)
     policy.eval()
     return policy
 
