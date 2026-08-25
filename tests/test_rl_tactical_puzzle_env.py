@@ -4,7 +4,12 @@ import chess
 import numpy as np
 
 from chess_agent.rl.actions import move_to_action
-from chess_agent.rl.evaluate_tactical import evaluate_tactical_random_baseline
+from chess_agent.rl.evaluate_tactical import (
+    evaluate_tactical_random_baseline,
+    print_result,
+    rating_bucket_label,
+    rating_bucket_start,
+)
 from chess_agent.rl.tactical_puzzle_env import (
     TacticalPuzzle,
     TacticalPuzzleEnv,
@@ -79,6 +84,63 @@ def test_tactical_random_baseline_runs() -> None:
 
     assert result.episodes == 2
     assert 0 <= result.move_accuracy <= 1
+
+
+def test_tactical_evaluation_builds_metadata_breakdowns() -> None:
+    first = make_tactical_puzzle()
+    second = TacticalPuzzle(
+        initial_fen=first.initial_fen,
+        line_uci=first.line_uci,
+        rating=1675,
+        themes=("fork", "skewer"),
+    )
+
+    result = evaluate_tactical_random_baseline(
+        env=TacticalPuzzleEnv(puzzles=[first, second]),
+        episodes=2,
+        seed=0,
+    )
+
+    ratings = {row.label: row for row in result.rating_breakdown}
+    themes = {row.label: row for row in result.theme_breakdown}
+    move_counts = {row.label: row for row in result.move_count_breakdown}
+
+    assert ratings["1200-1399"].episodes == 1
+    assert ratings["1600-1799"].episodes == 1
+    assert themes["fork"].episodes == 2
+    assert themes["pin"].episodes == 1
+    assert themes["skewer"].episodes == 1
+    assert move_counts["2"].episodes == 2
+
+
+def test_print_tactical_result_filters_small_theme_groups(capsys) -> None:
+    first = make_tactical_puzzle()
+    second = TacticalPuzzle(
+        initial_fen=first.initial_fen,
+        line_uci=first.line_uci,
+        rating=1675,
+        themes=("fork", "skewer"),
+    )
+    result = evaluate_tactical_random_baseline(
+        env=TacticalPuzzleEnv(puzzles=[first, second]),
+        episodes=2,
+        seed=0,
+    )
+
+    print_result("random", result, min_theme_episodes=2)
+    output = capsys.readouterr().out
+
+    assert "Rating breakdown" in output
+    assert "Agent move-count breakdown" in output
+    assert "fork" in output
+    assert "pin" not in output
+    assert "skewer" not in output
+
+
+def test_rating_bucket_uses_two_hundred_point_ranges() -> None:
+    assert rating_bucket_label(rating_bucket_start(1399)) == "1200-1399"
+    assert rating_bucket_label(rating_bucket_start(1400)) == "1400-1599"
+    assert rating_bucket_label(rating_bucket_start(None)) == "unknown"
 
 
 def make_tactical_puzzle() -> TacticalPuzzle:

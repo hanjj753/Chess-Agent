@@ -217,6 +217,16 @@ Linux:
 python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp/tactical_supervised_cnn_best.pt --puzzles-file data/puzzle_processed/tactical_valid.txt --episodes 10000 --device cuda
 ```
 
+평가 결과에는 전체 성능과 함께 다음 breakdown이 자동으로 출력됩니다.
+
+- `Rating breakdown`: 200점 단위 Lichess rating 구간
+- `Agent move-count breakdown`: 퍼즐을 끝내기 위해 맞혀야 하는 agent move 개수
+- `Theme breakdown`: `fork`, `pin`, `mateIn2` 같은 전술 주제별 결과
+
+한 퍼즐에는 theme가 여러 개 붙을 수 있으므로 theme별 `Episodes` 합계는 전체 episode 수보다 클 수 있습니다.
+기본적으로 episode가 20개보다 적은 theme는 숨깁니다. 모든 theme를 보려면 Windows와 Linux 모두 평가 명령에 `--min-theme-episodes 0`을 추가합니다.
+Theme 표는 성공률이 낮은 순서로 출력되므로 취약한 전술을 위에서부터 확인할 수 있습니다.
+
 `Validation accuracy`는 각 agent turn에서 정답 수를 맞힌 비율이고, `Validation puzzle success`는 한 퍼즐의 sequence를 끝까지 모두 맞힌 비율입니다.
 여러 수를 연속으로 맞혀야 하므로 puzzle success는 move accuracy보다 훨씬 낮게 나오는 것이 자연스럽습니다.
 학습 로그에는 `best_val_acc`와 `best_epoch`가 계속 출력됩니다.
