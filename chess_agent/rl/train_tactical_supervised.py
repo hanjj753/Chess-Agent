@@ -6,7 +6,7 @@ from typing import Sequence
 import chess
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
 from chess_agent.rl.actions import legal_action_mask, move_to_action
 from chess_agent.rl.checkpoints import (
@@ -30,6 +30,17 @@ from chess_agent.rl.train_mate_in_one_supervised import AccuracyResult, evaluate
 
 
 TACTICAL_SUPERVISED_CHECKPOINT_KIND = "tactical_supervised"
+TARGET_WEAK_THEME_WEIGHTS: tuple[tuple[str, float], ...] = (
+    ("quietMove", 3.0),
+    ("defensiveMove", 3.0),
+    ("trappedPiece", 2.5),
+    ("discoveredCheck", 2.5),
+    ("bishopEndgame", 2.0),
+    ("queenEndgame", 2.0),
+    ("advancedPawn", 1.5),
+    ("capturingDefender", 1.5),
+    ("promotion", 1.5),
+)
 
 
 @dataclass(frozen=True)
@@ -57,6 +68,7 @@ class TacticalSupervisedTrainingConfig:
     weight_decay: float = 1e-4
     early_stopping_patience: int | None = 15
     early_stopping_min_delta: float = 0.0
+    theme_weights: tuple[tuple[str, float], ...] = ()
     train_fraction: float = 0.9
     seed: int = 0
     device: str = "cpu"
@@ -100,6 +112,67 @@ class TacticalSampleDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tens
         )
 
 
+def normalize_theme_weights(
+    theme_weights: Sequence[tuple[str, float]],
+) -> dict[str, float]:
+    normalized: dict[str, float] = {}
+    for raw_theme, raw_weight in theme_weights:
+        theme = raw_theme.strip()
+        weight = float(raw_weight)
+        if not theme:
+            raise ValueError("theme weight name must not be empty")
+        if weight < 1:
+            raise ValueError("theme weights must be at least 1.0")
+        normalized[theme] = weight
+    return normalized
+
+
+def training_sample_weight(
+    sample: TacticalTrainingSample,
+    theme_weights: dict[str, float],
+) -> float:
+    return max(
+        (theme_weights.get(theme, 1.0) for theme in sample.themes),
+        default=1.0,
+    )
+
+
+def make_train_loader(
+    *,
+    dataset: TacticalSampleDataset,
+    batch_size: int,
+    seed: int,
+    theme_weights: dict[str, float],
+) -> DataLoader:
+    generator = torch.Generator().manual_seed(seed)
+    if not theme_weights:
+        return DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            generator=generator,
+        )
+
+    sample_weights = torch.tensor(
+        [
+            training_sample_weight(sample, theme_weights)
+            for sample in dataset.samples
+        ],
+        dtype=torch.double,
+    )
+    sampler = WeightedRandomSampler(
+        weights=sample_weights,
+        num_samples=len(dataset),
+        replacement=True,
+        generator=generator,
+    )
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        sampler=sampler,
+    )
+
+
 def train_tactical_supervised_policy(
     config: TacticalSupervisedTrainingConfig,
 ) -> tuple[PolicyNetwork, TacticalSupervisedTrainingResult]:
@@ -123,6 +196,7 @@ def train_tactical_supervised_policy(
         raise ValueError("early_stopping_patience must be positive or None")
     if config.early_stopping_min_delta < 0:
         raise ValueError("early_stopping_min_delta must be non-negative")
+    theme_weights = normalize_theme_weights(config.theme_weights)
 
     torch.manual_seed(config.seed)
     device = torch.device(config.device)
@@ -142,12 +216,21 @@ def train_tactical_supervised_policy(
     validation_dataset = TacticalSampleDataset(samples_from_puzzles(validation_puzzles))
     if config.early_stopping_patience is not None and len(validation_dataset) == 0:
         raise ValueError("validation puzzles are required for early stopping")
-    train_loader = DataLoader(
-        train_dataset,
+    train_loader = make_train_loader(
+        dataset=train_dataset,
         batch_size=config.batch_size,
-        shuffle=True,
-        generator=torch.Generator().manual_seed(config.seed),
+        seed=config.seed,
+        theme_weights=theme_weights,
     )
+    if theme_weights:
+        print(
+            "Theme sampling weights: "
+            + ", ".join(
+                f"{theme}={weight:g}x"
+                for theme, weight in theme_weights.items()
+            ),
+            flush=True,
+        )
 
     completed_epochs = 0
     best_validation_accuracy = -1.0
@@ -175,6 +258,13 @@ def train_tactical_supervised_policy(
         epochs_without_improvement = int(
             progress.get("epochs_without_improvement", 0)
         )
+        saved_theme_weights = progress.get("theme_weights")
+        if saved_theme_weights is not None:
+            checkpoint_theme_weights = normalize_theme_weights(saved_theme_weights)
+            if checkpoint_theme_weights != theme_weights:
+                raise ValueError(
+                    "theme weights do not match the resumed checkpoint"
+                )
         if completed_epochs > config.epochs:
             raise ValueError(
                 "checkpoint has already completed more epochs than requested"
@@ -251,6 +341,7 @@ def train_tactical_supervised_policy(
                         best_validation_accuracy=best_validation_accuracy,
                         best_epoch=best_epoch,
                         epochs_without_improvement=epochs_without_improvement,
+                        theme_weights=tuple(theme_weights.items()),
                     )
             else:
                 epochs_without_improvement += 1
@@ -281,6 +372,7 @@ def train_tactical_supervised_policy(
                 best_validation_accuracy=best_validation_accuracy,
                 best_epoch=best_epoch,
                 epochs_without_improvement=epochs_without_improvement,
+                theme_weights=tuple(theme_weights.items()),
             )
 
         if (
@@ -324,6 +416,7 @@ def train_tactical_supervised_policy(
                 best_validation_accuracy=best_validation_accuracy,
                 best_epoch=best_epoch,
                 epochs_without_improvement=0,
+                theme_weights=tuple(theme_weights.items()),
             )
     validation_success_rate, validation_move_accuracy = evaluate_validation_puzzles(
         policy=policy,
@@ -343,6 +436,7 @@ def train_tactical_supervised_policy(
             best_validation_accuracy=best_validation_accuracy,
             best_epoch=best_epoch,
             epochs_without_improvement=epochs_without_improvement,
+            theme_weights=tuple(theme_weights.items()),
         )
 
     return policy, TacticalSupervisedTrainingResult(
@@ -449,6 +543,7 @@ def save_tactical_supervised_checkpoint(
     best_validation_accuracy: float = -1.0,
     best_epoch: int | None = None,
     epochs_without_improvement: int = 0,
+    theme_weights: tuple[tuple[str, float], ...] = (),
 ) -> Path:
     return save_training_checkpoint(
         path,
@@ -460,12 +555,36 @@ def save_tactical_supervised_checkpoint(
             "best_validation_accuracy": best_validation_accuracy,
             "best_epoch": best_epoch,
             "epochs_without_improvement": epochs_without_improvement,
+            "theme_weights": theme_weights,
         },
     )
 
 
 def format_best_epoch(best_epoch: int | None) -> str:
     return "-" if best_epoch is None else str(best_epoch)
+
+
+def parse_theme_weight(value: str) -> tuple[str, float]:
+    theme, separator, raw_weight = value.partition("=")
+    if not separator or not theme.strip():
+        raise argparse.ArgumentTypeError("theme weight must use THEME=WEIGHT")
+    try:
+        weight = float(raw_weight)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("theme weight must be a number") from exc
+    if weight < 1:
+        raise argparse.ArgumentTypeError("theme weight must be at least 1.0")
+    return theme.strip(), weight
+
+
+def resolve_cli_theme_weights(
+    *,
+    target_weak_themes: bool,
+    custom_weights: Sequence[tuple[str, float]],
+) -> tuple[tuple[str, float], ...]:
+    weights = dict(TARGET_WEAK_THEME_WEIGHTS) if target_weak_themes else {}
+    weights.update(custom_weights)
+    return tuple(weights.items())
 
 
 def main() -> None:
@@ -487,6 +606,19 @@ def main() -> None:
         help="early stopping patience; use 0 to disable",
     )
     parser.add_argument("--min-delta", type=float, default=0.0)
+    parser.add_argument(
+        "--target-weak-themes",
+        action="store_true",
+        help="oversample the weakness profile found by tactical evaluation",
+    )
+    parser.add_argument(
+        "--theme-weight",
+        type=parse_theme_weight,
+        action="append",
+        default=[],
+        metavar="THEME=WEIGHT",
+        help="add or override one theme sampling weight",
+    )
     parser.add_argument("--train-fraction", type=float, default=0.9)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cpu")
@@ -500,6 +632,10 @@ def main() -> None:
     parser.add_argument("--best-checkpoint-path", type=Path)
     parser.add_argument("--resume-from", type=Path)
     args = parser.parse_args()
+    theme_weights = resolve_cli_theme_weights(
+        target_weak_themes=args.target_weak_themes,
+        custom_weights=args.theme_weight,
+    )
 
     _, result = train_tactical_supervised_policy(
         TacticalSupervisedTrainingConfig(
@@ -515,6 +651,7 @@ def main() -> None:
             weight_decay=args.weight_decay,
             early_stopping_patience=None if args.patience == 0 else args.patience,
             early_stopping_min_delta=args.min_delta,
+            theme_weights=theme_weights,
             train_fraction=args.train_fraction,
             seed=args.seed,
             device=args.device,

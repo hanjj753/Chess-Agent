@@ -189,6 +189,40 @@ python -m chess_agent.rl.train_tactical_supervised --puzzles-file data/puzzle_pr
 GPU 메모리가 충분하면 `--batch-size 512`, 부족하면 `128`로 조절합니다.
 조기 종료를 끄려면 `--patience 0`을 사용합니다.
 
+### 약점 Theme Targeted 학습
+
+난이도 보정 평가에서 확인한 약점 theme를 일반 sample보다 `1.5~3배` 자주 뽑는 프로필입니다.
+한 sample에 여러 대상 theme가 있어도 가중치를 곱하지 않고 가장 큰 값만 적용하며, 한 epoch의 전체 sample 수는 바뀌지 않습니다.
+기존 자연 분포 모델과 정확히 비교하기 위해 baseline checkpoint를 이어받지 않고 새 모델과 새 파일명으로 시작합니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.train_tactical_supervised --puzzles-file data\puzzle_processed\tactical_train.txt --validation-file data\puzzle_processed\tactical_valid.txt --epochs 500 --batch-size 256 --architecture cnn --hidden-size 64 --residual-blocks 3 --dropout 0.1 --learning-rate 0.0003 --weight-decay 0.0001 --patience 15 --target-weak-themes --device cuda --save-path tmp\tactical_supervised_cnn_targeted.pt --checkpoint-path tmp\tactical_supervised_cnn_targeted_checkpoint.pt --checkpoint-every 1 --best-checkpoint-path tmp\tactical_supervised_cnn_targeted_best.pt
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.train_tactical_supervised --puzzles-file data/puzzle_processed/tactical_train.txt --validation-file data/puzzle_processed/tactical_valid.txt --epochs 500 --batch-size 256 --architecture cnn --hidden-size 64 --residual-blocks 3 --dropout 0.1 --learning-rate 0.0003 --weight-decay 0.0001 --patience 15 --target-weak-themes --device cuda --save-path tmp/tactical_supervised_cnn_targeted.pt --checkpoint-path tmp/tactical_supervised_cnn_targeted_checkpoint.pt --checkpoint-every 1 --best-checkpoint-path tmp/tactical_supervised_cnn_targeted_best.pt
+```
+
+Windows 평가:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp\tactical_supervised_cnn_targeted_best.pt --puzzles-file data\puzzle_processed\tactical_valid.txt --episodes all --device cuda --output-path analysis\tactical_evaluation_cnn_targeted.txt
+```
+
+Linux 평가:
+
+```bash
+python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp/tactical_supervised_cnn_targeted_best.pt --puzzles-file data/puzzle_processed/tactical_valid.txt --episodes all --device cuda --output-path analysis/tactical_evaluation_cnn_targeted.txt
+```
+
+기본 프로필은 `quietMove=3`, `defensiveMove=3`, `trappedPiece=2.5`, `discoveredCheck=2.5`, `bishopEndgame=2`, `queenEndgame=2`, `advancedPawn=1.5`, `capturingDefender=1.5`, `promotion=1.5`입니다.
+개별 값을 바꾸려면 `--theme-weight quietMove=4`처럼 추가합니다.
+Targeted checkpoint를 재개할 때도 반드시 `--target-weak-themes`와 처음 사용한 custom weight를 동일하게 지정해야 합니다.
+
 서버 중단 등으로 checkpoint에서 이어서 돌릴 때 `--epochs`는 추가 epoch가 아니라 도달할 총 epoch입니다.
 
 Windows PowerShell:
@@ -241,6 +275,16 @@ Theme 표는 성공률이 낮은 순서로 출력되므로 취약한 전술을 �
 학습 로그에는 `best_val_acc`와 `best_epoch`가 계속 출력됩니다.
 `--save-path`는 마지막 epoch 모델이고, `--best-checkpoint-path`는 validation accuracy가 가장 좋았던 epoch의 모델입니다.
 기존 MLP checkpoint는 계속 불러오고 평가할 수 있지만 CNN으로 변환되지는 않습니다. CNN 학습은 위 명령처럼 새 파일명으로 시작합니다.
+
+## 이전 수 History 계획
+
+현재 observation은 한 시점의 `(18, 8, 8)` 보드 상태만 사용합니다.
+캐슬링 권리와 앙파상 정보는 포함하지만 3회 반복과 50수 규칙을 정확히 판단할 history와 halfmove clock은 포함하지 않습니다.
+이전 보드를 channel 방향으로 쌓으면 반복과 최근 진행뿐 아니라 수 사이의 변화를 CNN이 직접 볼 수 있습니다.
+
+현재 Lichess tactical 파일은 첫 puzzle position 이전의 실제 대국 수순을 제공하지 않으므로 첫 agent move에 일관된 history를 만들 수 없습니다.
+따라서 tactical 모델의 입력 shape을 지금 변경하지 않고, full-game/self-play 환경을 만들 때 environment가 보관한 최근 position들을 사용하는 새 observation 버전으로 추가합니다.
+기존 checkpoint와 입력 shape이 달라지므로 현재 모델은 보존하고 history 모델은 별도로 관리합니다.
 
 ## GPU/CUDA 사용
 

@@ -1,11 +1,18 @@
 from pathlib import Path
 
 import chess
+from torch.utils.data import WeightedRandomSampler
 
 from chess_agent.rl.tactical_puzzle_env import TacticalPuzzle, format_tactical_puzzle_line
 from chess_agent.rl.train_tactical_supervised import (
+    TARGET_WEAK_THEME_WEIGHTS,
+    TacticalSampleDataset,
     TacticalSupervisedTrainingConfig,
+    TacticalTrainingSample,
+    make_train_loader,
+    resolve_cli_theme_weights,
     samples_from_puzzles,
+    training_sample_weight,
     train_tactical_supervised_policy,
 )
 
@@ -15,6 +22,52 @@ def test_samples_from_puzzles_collects_agent_turns_only() -> None:
 
     assert [sample.target_uci for sample in samples] == ["e7e5", "b8c6"]
     assert all(sample.fen for sample in samples)
+
+
+def test_theme_sample_weight_uses_largest_matching_weight() -> None:
+    sample = TacticalTrainingSample(
+        fen=chess.STARTING_FEN,
+        target_uci="e2e4",
+        target_action=0,
+        puzzle_index=0,
+        line_index=0,
+        themes=("quietMove", "trappedPiece"),
+    )
+
+    weight = training_sample_weight(
+        sample,
+        {"quietMove": 3.0, "trappedPiece": 2.5},
+    )
+
+    assert weight == 3.0
+
+
+def test_weighted_train_loader_preserves_epoch_sample_count() -> None:
+    samples = samples_from_puzzles([make_tactical_puzzle()])
+    dataset = TacticalSampleDataset(samples)
+
+    loader = make_train_loader(
+        dataset=dataset,
+        batch_size=2,
+        seed=0,
+        theme_weights={"fork": 2.0},
+    )
+
+    assert isinstance(loader.sampler, WeightedRandomSampler)
+    assert loader.sampler.num_samples == len(dataset)
+
+
+def test_target_theme_profile_can_be_overridden() -> None:
+    weights = dict(
+        resolve_cli_theme_weights(
+            target_weak_themes=True,
+            custom_weights=(("quietMove", 4.0), ("fork", 1.5)),
+        )
+    )
+
+    assert dict(TARGET_WEAK_THEME_WEIGHTS)["quietMove"] == 3.0
+    assert weights["quietMove"] == 4.0
+    assert weights["fork"] == 1.5
 
 
 def test_tactical_supervised_training_runs_and_saves_policy(tmp_path: Path) -> None:
