@@ -208,24 +208,33 @@ python -m chess_agent.rl.train_tactical_supervised --puzzles-file data/puzzle_pr
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp\tactical_supervised_cnn_best.pt --puzzles-file data\puzzle_processed\tactical_valid.txt --episodes 10000 --device cuda
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp\tactical_supervised_cnn_best.pt --puzzles-file data\puzzle_processed\tactical_valid.txt --episodes all --device cuda --output-path analysis\tactical_evaluation_cnn.txt
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp/tactical_supervised_cnn_best.pt --puzzles-file data/puzzle_processed/tactical_valid.txt --episodes 10000 --device cuda
+python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp/tactical_supervised_cnn_best.pt --puzzles-file data/puzzle_processed/tactical_valid.txt --episodes all --device cuda --output-path analysis/tactical_evaluation_cnn.txt
 ```
+
+`--episodes all`은 validation 파일의 각 퍼즐을 정확히 한 번씩 평가합니다.
+숫자를 지정했는데 validation 퍼즐보다 크면 처음부터 순환하며 일부 퍼즐을 반복 평가하므로, 최종 비교에는 `all`을 권장합니다.
+`--output-path`를 지정하면 콘솔과 같은 내용을 UTF-8 TXT로 저장하며 상위 폴더가 없으면 자동으로 만듭니다.
 
 평가 결과에는 전체 성능과 함께 다음 breakdown이 자동으로 출력됩니다.
 
 - `Rating breakdown`: 200점 단위 Lichess rating 구간
 - `Agent move-count breakdown`: 퍼즐을 끝내기 위해 맞혀야 하는 agent move 개수
 - `Theme breakdown`: `fork`, `pin`, `mateIn2` 같은 전술 주제별 결과
+- `Difficulty-adjusted theme breakdown`: rating 구간과 move count를 보정한 theme별 결과
 
 한 퍼즐에는 theme가 여러 개 붙을 수 있으므로 theme별 `Episodes` 합계는 전체 episode 수보다 클 수 있습니다.
 기본적으로 episode가 20개보다 적은 theme는 숨깁니다. 모든 theme를 보려면 Windows와 Linux 모두 평가 명령에 `--min-theme-episodes 0`을 추가합니다.
 Theme 표는 성공률이 낮은 순서로 출력되므로 취약한 전술을 위에서부터 확인할 수 있습니다.
+
+난이도 보정 표의 `Expected`는 같은 `rating 200점 구간 + agent move count`에 속한 전체 퍼즐의 평균으로 계산합니다.
+`Success gap`과 `Move gap`은 `실제 - 기대`이며 음수일수록 난이도와 길이를 고려한 뒤에도 해당 theme에 약하다는 뜻입니다.
+한 퍼즐에 theme가 여러 개 붙을 수 있으므로 이 결과는 theme의 인과 효과가 아니라 취약 영역을 찾기 위한 진단 지표로 해석합니다.
 
 `Validation accuracy`는 각 agent turn에서 정답 수를 맞힌 비율이고, `Validation puzzle success`는 한 퍼즐의 sequence를 끝까지 모두 맞힌 비율입니다.
 여러 수를 연속으로 맞혀야 하므로 puzzle success는 move accuracy보다 훨씬 낮게 나오는 것이 자연스럽습니다.

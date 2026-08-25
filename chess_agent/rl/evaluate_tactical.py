@@ -1,6 +1,7 @@
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TextIO
 
 import torch
 
@@ -40,6 +41,49 @@ class TacticalBreakdownRow:
 
 
 @dataclass(frozen=True)
+class TacticalAdjustedThemeRow:
+    label: str
+    episodes: int
+    successes: int
+    expected_successes: float
+    correct_moves: int
+    expected_correct_moves: float
+    expected_moves: int
+
+    @property
+    def success_rate(self) -> float:
+        if self.episodes == 0:
+            return 0.0
+        return self.successes / self.episodes
+
+    @property
+    def expected_success_rate(self) -> float:
+        if self.episodes == 0:
+            return 0.0
+        return self.expected_successes / self.episodes
+
+    @property
+    def success_gap(self) -> float:
+        return self.success_rate - self.expected_success_rate
+
+    @property
+    def move_accuracy(self) -> float:
+        if self.expected_moves == 0:
+            return 0.0
+        return self.correct_moves / self.expected_moves
+
+    @property
+    def expected_move_accuracy(self) -> float:
+        if self.expected_moves == 0:
+            return 0.0
+        return self.expected_correct_moves / self.expected_moves
+
+    @property
+    def move_accuracy_gap(self) -> float:
+        return self.move_accuracy - self.expected_move_accuracy
+
+
+@dataclass(frozen=True)
 class TacticalEvaluationResult:
     episodes: int
     successes: int
@@ -50,6 +94,7 @@ class TacticalEvaluationResult:
     rating_breakdown: tuple[TacticalBreakdownRow, ...] = ()
     theme_breakdown: tuple[TacticalBreakdownRow, ...] = ()
     move_count_breakdown: tuple[TacticalBreakdownRow, ...] = ()
+    adjusted_theme_breakdown: tuple[TacticalAdjustedThemeRow, ...] = ()
 
     @property
     def success_rate(self) -> float:
@@ -131,7 +176,12 @@ def evaluate_tactical_policy(
         )
 
     policy.train(was_training)
-    rating_breakdown, theme_breakdown, move_count_breakdown = breakdowns.freeze()
+    (
+        rating_breakdown,
+        theme_breakdown,
+        move_count_breakdown,
+        adjusted_theme_breakdown,
+    ) = breakdowns.freeze()
     return TacticalEvaluationResult(
         episodes=episodes,
         successes=successes,
@@ -142,6 +192,7 @@ def evaluate_tactical_policy(
         rating_breakdown=rating_breakdown,
         theme_breakdown=theme_breakdown,
         move_count_breakdown=move_count_breakdown,
+        adjusted_theme_breakdown=adjusted_theme_breakdown,
     )
 
 
@@ -199,7 +250,12 @@ def evaluate_tactical_random_baseline(
             total_reward=episode_reward,
         )
 
-    rating_breakdown, theme_breakdown, move_count_breakdown = breakdowns.freeze()
+    (
+        rating_breakdown,
+        theme_breakdown,
+        move_count_breakdown,
+        adjusted_theme_breakdown,
+    ) = breakdowns.freeze()
     return TacticalEvaluationResult(
         episodes=episodes,
         successes=successes,
@@ -210,6 +266,7 @@ def evaluate_tactical_random_baseline(
         rating_breakdown=rating_breakdown,
         theme_breakdown=theme_breakdown,
         move_count_breakdown=move_count_breakdown,
+        adjusted_theme_breakdown=adjusted_theme_breakdown,
     )
 
 
@@ -246,11 +303,57 @@ class MutableTacticalStats:
         )
 
 
+@dataclass
+class MutableAdjustedThemeStats:
+    episodes: int = 0
+    successes: int = 0
+    expected_successes: float = 0.0
+    correct_moves: int = 0
+    expected_correct_moves: float = 0.0
+    expected_moves: int = 0
+
+    def add_stratum(
+        self,
+        *,
+        observed: MutableTacticalStats,
+        baseline: MutableTacticalStats,
+    ) -> None:
+        self.episodes += observed.episodes
+        self.successes += observed.successes
+        self.expected_successes += observed.episodes * (
+            baseline.successes / baseline.episodes
+        )
+        self.correct_moves += observed.correct_moves
+        self.expected_correct_moves += observed.expected_moves * (
+            baseline.correct_moves / baseline.expected_moves
+        )
+        self.expected_moves += observed.expected_moves
+
+    def freeze(self, label: str) -> TacticalAdjustedThemeRow:
+        return TacticalAdjustedThemeRow(
+            label=label,
+            episodes=self.episodes,
+            successes=self.successes,
+            expected_successes=self.expected_successes,
+            correct_moves=self.correct_moves,
+            expected_correct_moves=self.expected_correct_moves,
+            expected_moves=self.expected_moves,
+        )
+
+
 class TacticalBreakdownAccumulator:
     def __init__(self) -> None:
         self.by_rating: dict[int | None, MutableTacticalStats] = {}
         self.by_theme: dict[str, MutableTacticalStats] = {}
         self.by_move_count: dict[int, MutableTacticalStats] = {}
+        self.by_difficulty: dict[
+            tuple[int | None, int],
+            MutableTacticalStats,
+        ] = {}
+        self.by_theme_difficulty: dict[
+            tuple[str, int | None, int],
+            MutableTacticalStats,
+        ] = {}
 
     def add(
         self,
@@ -278,10 +381,27 @@ class TacticalBreakdownAccumulator:
             expected_moves=expected_moves,
             total_reward=total_reward,
         )
+        difficulty_key = (rating_key, puzzle.agent_move_count)
+        add_group_result(
+            self.by_difficulty,
+            difficulty_key,
+            success=success,
+            correct_moves=correct_moves,
+            expected_moves=expected_moves,
+            total_reward=total_reward,
+        )
         for theme in set(puzzle.themes) or {"unknown"}:
             add_group_result(
                 self.by_theme,
                 theme,
+                success=success,
+                correct_moves=correct_moves,
+                expected_moves=expected_moves,
+                total_reward=total_reward,
+            )
+            add_group_result(
+                self.by_theme_difficulty,
+                (theme, *difficulty_key),
                 success=success,
                 correct_moves=correct_moves,
                 expected_moves=expected_moves,
@@ -294,6 +414,7 @@ class TacticalBreakdownAccumulator:
         tuple[TacticalBreakdownRow, ...],
         tuple[TacticalBreakdownRow, ...],
         tuple[TacticalBreakdownRow, ...],
+        tuple[TacticalAdjustedThemeRow, ...],
     ]:
         rating_rows = tuple(
             self.by_rating[key].freeze(rating_bucket_label(key))
@@ -310,7 +431,25 @@ class TacticalBreakdownAccumulator:
             self.by_move_count[count].freeze(str(count))
             for count in sorted(self.by_move_count)
         )
-        return rating_rows, theme_rows, move_count_rows
+        adjusted_theme_rows = self.freeze_adjusted_themes()
+        return rating_rows, theme_rows, move_count_rows, adjusted_theme_rows
+
+    def freeze_adjusted_themes(self) -> tuple[TacticalAdjustedThemeRow, ...]:
+        adjusted: dict[str, MutableAdjustedThemeStats] = {}
+        for (
+            theme,
+            rating_key,
+            move_count,
+        ), observed in self.by_theme_difficulty.items():
+            baseline = self.by_difficulty[(rating_key, move_count)]
+            adjusted.setdefault(theme, MutableAdjustedThemeStats()).add_stratum(
+                observed=observed,
+                baseline=baseline,
+            )
+        return tuple(
+            adjusted[theme].freeze(theme)
+            for theme in sorted(adjusted)
+        )
 
 
 def add_group_result(
@@ -345,11 +484,18 @@ def rating_bucket_label(bucket_start: int | None) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--agent", choices=["random", "policy"], default="random")
-    parser.add_argument("--episodes", type=int, default=1_000)
+    parser.add_argument(
+        "--episodes",
+        type=parse_episode_count,
+        default=None,
+        metavar="N|all",
+        help="number of puzzles to evaluate; default: all",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--model-path", type=Path)
     parser.add_argument("--puzzles-file", type=Path)
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--output-path", type=Path)
     parser.add_argument(
         "--min-theme-episodes",
         type=int,
@@ -361,10 +507,11 @@ def main() -> None:
         raise ValueError("--min-theme-episodes must be non-negative")
 
     env = TacticalPuzzleEnv(puzzles_file=args.puzzles_file)
+    episodes = len(env.puzzles) if args.episodes is None else args.episodes
     if args.agent == "random":
         result = evaluate_tactical_random_baseline(
             env=env,
-            episodes=args.episodes,
+            episodes=episodes,
             seed=args.seed,
         )
     else:
@@ -373,7 +520,7 @@ def main() -> None:
         result = evaluate_saved_tactical_policy(
             env=env,
             model_path=args.model_path,
-            episodes=args.episodes,
+            episodes=episodes,
             device=args.device,
         )
 
@@ -382,6 +529,27 @@ def main() -> None:
         result,
         min_theme_episodes=args.min_theme_episodes,
     )
+    if args.output_path is not None:
+        saved_path = save_result_report(
+            args.output_path,
+            agent_name=args.agent,
+            result=result,
+            min_theme_episodes=args.min_theme_episodes,
+        )
+        print()
+        print(f"Saved report:   {saved_path}")
+
+
+def parse_episode_count(value: str) -> int | None:
+    if value.lower() == "all":
+        return None
+    try:
+        episodes = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("episodes must be a non-negative integer or 'all'") from exc
+    if episodes < 0:
+        raise argparse.ArgumentTypeError("episodes must be non-negative")
+    return episodes
 
 
 def evaluate_saved_tactical_policy(
@@ -407,17 +575,22 @@ def print_result(
     result: TacticalEvaluationResult,
     *,
     min_theme_episodes: int = 20,
+    file: TextIO | None = None,
 ) -> None:
-    print("Tactical puzzle evaluation")
-    print(f"Agent:          {agent_name}")
-    print(f"Episodes:       {result.episodes}")
-    print(f"Successes:      {result.successes}")
-    print(f"Success rate:   {result.success_rate:.1%}")
-    print(f"Move accuracy:  {result.move_accuracy:.1%}")
-    print(f"Illegal moves:  {result.illegal_actions}")
-    print(f"Average reward: {result.average_reward:.3f}")
-    print_breakdown("Rating breakdown", result.rating_breakdown)
-    print_breakdown("Agent move-count breakdown", result.move_count_breakdown)
+    print("Tactical puzzle evaluation", file=file)
+    print(f"Agent:          {agent_name}", file=file)
+    print(f"Episodes:       {result.episodes}", file=file)
+    print(f"Successes:      {result.successes}", file=file)
+    print(f"Success rate:   {result.success_rate:.1%}", file=file)
+    print(f"Move accuracy:  {result.move_accuracy:.1%}", file=file)
+    print(f"Illegal moves:  {result.illegal_actions}", file=file)
+    print(f"Average reward: {result.average_reward:.3f}", file=file)
+    print_breakdown("Rating breakdown", result.rating_breakdown, file=file)
+    print_breakdown(
+        "Agent move-count breakdown",
+        result.move_count_breakdown,
+        file=file,
+    )
 
     visible_themes = tuple(
         row for row in result.theme_breakdown
@@ -431,17 +604,38 @@ def print_result(
                 key=lambda row: (row.success_rate, -row.episodes, row.label),
             )
         ),
+        file=file,
+    )
+
+    visible_adjusted_themes = tuple(
+        row for row in result.adjusted_theme_breakdown
+        if row.episodes >= min_theme_episodes
+    )
+    print_adjusted_theme_breakdown(
+        (
+            "Difficulty-adjusted theme breakdown "
+            f"(rating + move count, min episodes={min_theme_episodes})"
+        ),
+        tuple(
+            sorted(
+                visible_adjusted_themes,
+                key=lambda row: (row.success_gap, -row.episodes, row.label),
+            )
+        ),
+        file=file,
     )
 
 
 def print_breakdown(
     title: str,
     rows: tuple[TacticalBreakdownRow, ...],
+    *,
+    file: TextIO | None = None,
 ) -> None:
-    print()
-    print(title)
+    print(file=file)
+    print(title, file=file)
     if not rows:
-        print("No groups to display.")
+        print("No groups to display.", file=file)
         return
 
     label_width = max(len("Group"), *(len(row.label) for row in rows))
@@ -450,7 +644,8 @@ def print_breakdown(
         f"{'Episodes':>8}  "
         f"{'Success':>8}  "
         f"{'Move acc':>8}  "
-        f"{'Avg reward':>10}"
+        f"{'Avg reward':>10}",
+        file=file,
     )
     for row in rows:
         print(
@@ -458,8 +653,62 @@ def print_breakdown(
             f"{row.episodes:8d}  "
             f"{row.success_rate:8.1%}  "
             f"{row.move_accuracy:8.1%}  "
-            f"{row.average_reward:10.3f}"
+            f"{row.average_reward:10.3f}",
+            file=file,
         )
+
+
+def print_adjusted_theme_breakdown(
+    title: str,
+    rows: tuple[TacticalAdjustedThemeRow, ...],
+    *,
+    file: TextIO | None = None,
+) -> None:
+    print(file=file)
+    print(title, file=file)
+    if not rows:
+        print("No groups to display.", file=file)
+        return
+
+    label_width = max(len("Group"), *(len(row.label) for row in rows))
+    print(
+        f"{'Group':<{label_width}}  "
+        f"{'Episodes':>8}  "
+        f"{'Observed':>8}  "
+        f"{'Expected':>8}  "
+        f"{'Success gap':>11}  "
+        f"{'Move gap':>8}",
+        file=file,
+    )
+    for row in rows:
+        print(
+            f"{row.label:<{label_width}}  "
+            f"{row.episodes:8d}  "
+            f"{row.success_rate:8.1%}  "
+            f"{row.expected_success_rate:8.1%}  "
+            f"{row.success_gap:+11.1%}  "
+            f"{row.move_accuracy_gap:+8.1%}",
+            file=file,
+        )
+
+
+def save_result_report(
+    path: str | Path,
+    *,
+    agent_name: str,
+    result: TacticalEvaluationResult,
+    min_theme_episodes: int = 20,
+) -> Path:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8", newline="\n") as handle:
+        print_result(
+            agent_name,
+            result,
+            min_theme_episodes=min_theme_episodes,
+            file=handle,
+        )
+    return output_path
 
 
 if __name__ == "__main__":
