@@ -29,7 +29,7 @@ PPO_OPPONENTS = ("random", "alpha")
 @dataclass(frozen=True)
 class FullChessPPOConfig:
     total_timesteps: int = 100_000
-    learning_rate: float = 1e-4
+    learning_rate: float = 3e-5
     n_envs: int = 4
     n_steps: int = 256
     batch_size: int = 256
@@ -37,6 +37,7 @@ class FullChessPPOConfig:
     gamma: float = 0.995
     gae_lambda: float = 0.95
     clip_range: float = 0.2
+    target_kl: float | None = 0.03
     entropy_coefficient: float = 0.01
     value_coefficient: float = 0.5
     max_grad_norm: float = 0.5
@@ -52,6 +53,7 @@ class FullChessPPOConfig:
     evaluation_games: int = 50
     checkpoint_every: int = 50_000
     deterministic_evaluation: bool = True
+    initial_evaluation: bool = True
     seed: int = 0
     device: str = "auto"
     pretrained_policy_value_path: Path | None = None
@@ -214,15 +216,9 @@ class FullChessTrainingCallback(BaseCallback):
 
         if self.config.evaluation_every > 0:
             while self.num_timesteps >= self.next_evaluation:
-                result = evaluate_full_chess_ppo(
+                result = evaluate_full_chess_ppo_from_config(
                     model=cast(MaskablePPO, self.model),
-                    episodes=self.config.evaluation_games,
-                    history_length=self.config.history_length,
-                    max_plies=self.config.max_plies,
-                    opponent=self.config.opponent,
-                    opponent_depth=self.config.opponent_depth,
-                    opponent_time_limit=self.config.opponent_time_limit,
-                    deterministic=self.config.deterministic_evaluation,
+                    config=self.config,
                     seed=self.config.seed + 100_000,
                 )
                 print_evaluation(self.num_timesteps, result)
@@ -302,6 +298,7 @@ def train_full_chess_ppo(
                 env=train_env,
                 device=config.device,
             )
+            model.target_kl = config.target_kl
         else:
             if config.pretrained_policy_value_path is not None:
                 pretrained_model = load_policy_value(
@@ -326,6 +323,7 @@ def train_full_chess_ppo(
                 gamma=config.gamma,
                 gae_lambda=config.gae_lambda,
                 clip_range=config.clip_range,
+                target_kl=config.target_kl,
                 ent_coef=config.entropy_coefficient,
                 vf_coef=config.value_coefficient,
                 max_grad_norm=config.max_grad_norm,
@@ -355,6 +353,33 @@ def train_full_chess_ppo(
             config=config,
             experiment_logger=experiment_logger,
         )
+        if config.initial_evaluation and config.evaluation_games > 0:
+            initial_step = model.num_timesteps
+            baseline = evaluate_full_chess_ppo_from_config(
+                model=model,
+                config=config,
+                seed=config.seed + 100_000,
+            )
+            print_evaluation(initial_step, baseline)
+            if experiment_logger is not None:
+                log_evaluation(
+                    experiment_logger,
+                    step=initial_step,
+                    phase="evaluation",
+                    opponent=config.opponent,
+                    checkpoint=f"step:{initial_step}:initial",
+                    result=baseline,
+                )
+            callback.best_score_rate = baseline.score_rate
+            baseline_path = save_ppo_model(model, config.best_model_path)
+            callback.saved_best_this_run = True
+            if experiment_logger is not None:
+                experiment_logger.log_checkpoint(
+                    step=initial_step,
+                    path=baseline_path,
+                    is_best=True,
+                    metrics={"score_rate": baseline.score_rate},
+                )
         if remaining_timesteps > 0:
             model.learn(
                 total_timesteps=remaining_timesteps,
@@ -364,19 +389,16 @@ def train_full_chess_ppo(
             )
 
         final_model_path = save_ppo_model(model, config.save_path)
-        final_evaluation = evaluate_full_chess_ppo(
+        final_evaluation = evaluate_full_chess_ppo_from_config(
             model=model,
-            episodes=config.evaluation_games,
-            history_length=config.history_length,
-            max_plies=config.max_plies,
-            opponent=config.opponent,
-            opponent_depth=config.opponent_depth,
-            opponent_time_limit=config.opponent_time_limit,
-            deterministic=config.deterministic_evaluation,
+            config=config,
             seed=config.seed + 200_000,
         )
         best_model_path = normalized_ppo_path(config.best_model_path)
-        if not callback.saved_best_this_run:
+        if (
+            not callback.saved_best_this_run
+            or final_evaluation.score_rate > callback.best_score_rate
+        ):
             callback.best_score_rate = final_evaluation.score_rate
             best_model_path = save_ppo_model(model, best_model_path)
             callback.saved_best_this_run = True
@@ -478,6 +500,25 @@ def evaluate_full_chess_ppo(
     finally:
         env.close()
     return FullChessEvaluationResult(games=tuple(games))
+
+
+def evaluate_full_chess_ppo_from_config(
+    *,
+    model: MaskablePPO,
+    config: FullChessPPOConfig,
+    seed: int,
+) -> FullChessEvaluationResult:
+    return evaluate_full_chess_ppo(
+        model=model,
+        episodes=config.evaluation_games,
+        history_length=config.history_length,
+        max_plies=config.max_plies,
+        opponent=config.opponent,
+        opponent_depth=config.opponent_depth,
+        opponent_time_limit=config.opponent_time_limit,
+        deterministic=config.deterministic_evaluation,
+        seed=seed,
+    )
 
 
 def make_vector_env(config: FullChessPPOConfig) -> VecEnv:
@@ -585,6 +626,8 @@ def next_interval(current_step: int, interval: int) -> int:
 def validate_config(config: FullChessPPOConfig) -> None:
     if config.total_timesteps < 0:
         raise ValueError("total_timesteps must be non-negative")
+    if not math.isfinite(config.learning_rate) or config.learning_rate <= 0:
+        raise ValueError("learning_rate must be positive")
     if config.n_envs < 1 or config.n_steps < 1:
         raise ValueError("n_envs and n_steps must be positive")
     rollout_size = config.n_envs * config.n_steps
@@ -596,6 +639,10 @@ def validate_config(config: FullChessPPOConfig) -> None:
         raise ValueError("batch_size must divide n_envs * n_steps")
     if config.n_epochs < 1:
         raise ValueError("n_epochs must be positive")
+    if config.target_kl is not None and (
+        not math.isfinite(config.target_kl) or config.target_kl <= 0
+    ):
+        raise ValueError("target_kl must be positive or None")
     if config.history_length < 0 or config.max_plies < 1:
         raise ValueError("invalid history_length or max_plies")
     if config.evaluation_every < 0 or config.checkpoint_every < 0:
@@ -611,7 +658,7 @@ def validate_config(config: FullChessPPOConfig) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--total-timesteps", type=int, default=100_000)
-    parser.add_argument("--learning-rate", type=float, default=1e-4)
+    parser.add_argument("--learning-rate", type=float, default=3e-5)
     parser.add_argument("--n-envs", type=int, default=4)
     parser.add_argument("--n-steps", type=int, default=256)
     parser.add_argument("--batch-size", type=int, default=256)
@@ -619,6 +666,13 @@ def main() -> None:
     parser.add_argument("--gamma", type=float, default=0.995)
     parser.add_argument("--gae-lambda", type=float, default=0.95)
     parser.add_argument("--clip-range", type=float, default=0.2)
+    parser.add_argument("--target-kl", type=float, default=0.03)
+    parser.add_argument(
+        "--no-target-kl",
+        action="store_const",
+        const=None,
+        dest="target_kl",
+    )
     parser.add_argument("--entropy-coefficient", type=float, default=0.01)
     parser.add_argument("--value-coefficient", type=float, default=0.5)
     parser.add_argument("--max-grad-norm", type=float, default=0.5)
@@ -634,6 +688,7 @@ def main() -> None:
     parser.add_argument("--evaluation-games", type=int, default=50)
     parser.add_argument("--checkpoint-every", type=int, default=50_000)
     parser.add_argument("--stochastic-evaluation", action="store_true")
+    parser.add_argument("--no-initial-evaluation", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--pretrained-policy-value", type=Path)
@@ -668,6 +723,7 @@ def main() -> None:
             gamma=args.gamma,
             gae_lambda=args.gae_lambda,
             clip_range=args.clip_range,
+            target_kl=args.target_kl,
             entropy_coefficient=args.entropy_coefficient,
             value_coefficient=args.value_coefficient,
             max_grad_norm=args.max_grad_norm,
@@ -683,6 +739,7 @@ def main() -> None:
             evaluation_games=args.evaluation_games,
             checkpoint_every=args.checkpoint_every,
             deterministic_evaluation=not args.stochastic_evaluation,
+            initial_evaluation=not args.no_initial_evaluation,
             seed=args.seed,
             device=args.device,
             pretrained_policy_value_path=args.pretrained_policy_value,

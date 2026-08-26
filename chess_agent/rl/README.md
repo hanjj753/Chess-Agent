@@ -36,6 +36,7 @@ Gymnasium 환경
 - `ppo_policy.py`: 기존 CNN 구조를 사용하는 Stable-Baselines3 maskable policy
 - `train_full_chess_ppo.py`: FullChess Maskable PPO 학습, 평가, checkpoint 기록
 - `evaluate_full_chess_ppo.py`: 저장된 PPO 모델의 독립 대국 평가와 TXT 보고서
+- `report_experiment.py`: 실험 로그를 한국어 TXT와 발표용 PNG로 자동 요약
 
 ## Full-Chess 환경
 
@@ -55,8 +56,36 @@ history가 부족한 부분은 0으로 채웁니다. 환경은 체크메이트�
 무승부 판정을 terminal로 처리하고, `max_plies`에 도달하면 truncate합니다.
 보상은 agent 관점에서 승리 `+1`, 무승부 `0`, 패배 `-1`입니다.
 
-현재 단계에는 FullChess 환경과 모델만 들어 있으며 PPO 학습 루프는 다음 단계에서
-연결합니다. 환경 검증 없이 장시간 self-play부터 시작하지 않기 위한 구분입니다.
+현재 PPO 학습은 고정된 random 또는 tree agent를 상대로 진행합니다. 두 학습 agent가
+서로 갱신되는 self-play는 아직 연결하지 않았습니다.
+
+### 학습 단위
+
+현재 `FullChessEnv`에서는 **episode 1개가 체스 대국 1판**입니다. RL에서 episode는
+`reset()`부터 terminal 또는 truncate까지의 한 trajectory를 뜻하며, 이 환경에서는
+그 시작과 끝이 대국의 시작과 끝에 정확히 대응합니다.
+
+- `ply`: 백 또는 흑이 둔 수 하나
+- `timestep`: agent가 action 하나를 고르고 `env.step()`을 호출한 횟수
+- `episode`: 게임이 끝날 때까지 이어진 timestep 묶음, 현재는 대국 1판
+- `rollout`: PPO가 한 번 학습하기 전에 여러 환경에서 모으는 timestep 묶음
+- `batch`: rollout을 network update에 넣기 위해 나눈 조각
+- `n_epochs`: 같은 rollout 데이터를 반복 학습하는 횟수
+
+`step()` 안에서 agent 수 뒤에 상대 응수까지 자동으로 진행하므로, 보통 timestep 1개는
+약 2 plies입니다. 게임이 rollout 도중 끝나면 환경은 새 episode를 시작해서 rollout에
+필요한 timestep 수를 계속 채웁니다. 따라서 rollout 하나에는 여러 대국이 섞일 수 있습니다.
+
+예를 들어 smoke 설정의 `n_envs=1`, `n_steps=256`, `batch_size=256`, `n_epochs=2`는
+다음 순서로 작동합니다.
+
+```text
+256 timestep 수집 -> 하나의 256개 batch 생성 -> 같은 batch로 PPO update 2회
+```
+
+`total_timesteps=4096`라면 이 rollout을 16번 수집합니다. smoke 결과의 학습 대국은
+115판이었으므로 rollout 하나에 평균 약 7판이 들어간 셈입니다. 평가 대국은 별도로
+결정론적 action을 사용해 실행하며, 그 결과로 network를 업데이트하지 않습니다.
 
 ## Policy-Value 초기화
 
@@ -113,6 +142,35 @@ python -m chess_agent.rl.train_tactical_supervised --puzzles-file data/puzzle_pr
 각 self-play 결과를 기록할 때 사용합니다. `metrics.csv`가 긴 형식이므로 pandas,
 Excel 또는 발표용 그래프 코드에서 `step`, `metric`, `value` 열을 바로 사용할 수 있습니다.
 
+### 자동 실험 보고서
+
+실험 폴더 하나를 지정하면 `report/` 아래에 한국어 요약과 발표에 쓸 그래프를 만듭니다.
+상위 `analysis/experiments` 폴더를 지정하면 수정 시각이 가장 최근인 실험을 자동으로
+선택합니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.report_experiment analysis\experiments
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.report_experiment analysis/experiments
+```
+
+특정 실험만 보고 싶으면 마지막 인자를 해당 실험 폴더로 바꿉니다. 생성 파일은 다음과
+같습니다.
+
+- `summary.txt`: 설정, W/D/L, 평가 추이, PPO 진단과 자동 경고
+- `learning_curves.png`: 평가 점수율, KL/clipping, Critic, entropy 곡선
+- `game_outcomes.png`: 평가 W/D/L과 학습 대국 종료 원인
+
+그래프가 필요 없으면 `--no-plots`, 다른 위치에 저장하려면 `--output-dir`을 사용합니다.
+자동 경고의 임계값은 smoke run을 빠르게 점검하기 위한 경험적 기준이며 절대적인
+성공 또는 실패 판정은 아닙니다.
+
 ## Full-Chess Maskable PPO
 
 PPO의 clipping, GAE, minibatch update는 직접 구현하지 않고 `sb3-contrib`의
@@ -120,32 +178,48 @@ PPO의 clipping, GAE, minibatch update는 직접 구현하지 않고 `sb3-contri
 custom policy가 프로젝트의 residual CNN과 Policy-Value head를 연결합니다.
 공식 사용법은 [Maskable PPO 문서](https://sb3-contrib.readthedocs.io/en/master/modules/ppo_mask.html)를 참고합니다.
 
+학습을 시작하기 전에 같은 평가 설정으로 `step=0` 대국을 먼저 실행합니다. 이 값이
+pretrained checkpoint의 baseline이며, 이후 평가는 같은 seed와 색 순서를 사용합니다.
+학습 결과가 baseline을 넘지 못하면 `--best-model-path`에는 step 0 모델이 유지됩니다.
+resume 학습에서는 step 0 대신 checkpoint의 누적 timestep에서 baseline을 기록합니다.
+
+`--target-kl`은 PPO update 중 policy 변화가 너무 커졌을 때 현재 rollout의 남은 epoch를
+조기 종료합니다. 전체 학습을 끝내는 옵션은 아닙니다. 기본값은 `0.03`이며 안전장치를
+끄려면 `--no-target-kl`, step 0 평가를 끄려면 `--no-initial-evaluation`을 사용합니다.
+
 먼저 짧은 smoke 학습으로 서버 환경과 저장 경로를 확인합니다.
 
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp\full_chess_policy_value.pt --total-timesteps 4096 --n-envs 1 --n-steps 256 --batch-size 256 --n-epochs 2 --max-plies 100 --evaluation-every 2048 --evaluation-games 10 --checkpoint-every 2048 --device cuda --experiment-name ppo_smoke
+.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp\full_chess_policy_value.pt --total-timesteps 4096 --n-envs 1 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 2048 --evaluation-games 50 --checkpoint-every 2048 --device cuda --save-path tmp\full_chess_ppo_stability_lr3e5_final.zip --best-model-path tmp\full_chess_ppo_stability_lr3e5_best.zip --checkpoint-dir tmp\full_chess_ppo_stability_lr3e5_checkpoints --experiment-name ppo_stability_lr3e5
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full_chess_policy_value.pt --total-timesteps 4096 --n-envs 1 --n-steps 256 --batch-size 256 --n-epochs 2 --max-plies 100 --evaluation-every 2048 --evaluation-games 10 --checkpoint-every 2048 --device cuda --experiment-name ppo_smoke
+python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full_chess_policy_value.pt --total-timesteps 4096 --n-envs 1 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 2048 --evaluation-games 50 --checkpoint-every 2048 --device cuda --save-path tmp/full_chess_ppo_stability_lr3e5_final.zip --best-model-path tmp/full_chess_ppo_stability_lr3e5_best.zip --checkpoint-dir tmp/full_chess_ppo_stability_lr3e5_checkpoints --experiment-name ppo_stability_lr3e5
 ```
 
-smoke run이 끝나면 random 상대 첫 본 학습을 실행합니다.
+이 실험에서는 기존 smoke run과 나머지 핵심 설정을 유지하면서 learning rate를
+`0.0001`에서 `0.00003`으로 낮춥니다. 보고서에서 step 0 대비 점수율과 함께
+`approx_kl`, `clip_fraction`, `explained_variance`를 비교합니다. 4,096 timestep은
+성능 결론을 내리기 위한 양이 아니라 update 안정성을 확인하는 smoke 규모입니다.
+
+smoke run에서 KL과 clipping이 충분히 내려간 것을 확인한 뒤 random 상대 첫 본 학습을
+실행합니다. 아직 불안정하면 본 학습으로 넘어가지 않고 `0.00001` learning rate를 같은
+조건으로 비교합니다.
 
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp\full_chess_policy_value.pt --total-timesteps 100000 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 4 --learning-rate 0.0001 --gamma 0.995 --entropy-coefficient 0.01 --max-plies 300 --evaluation-every 10000 --evaluation-games 50 --checkpoint-every 25000 --device cuda --save-path tmp\full_chess_ppo_random_final.zip --best-model-path tmp\full_chess_ppo_random_best.zip --checkpoint-dir tmp\full_chess_ppo_random_checkpoints --experiment-dir analysis\experiments --experiment-name ppo_random_v1
+.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp\full_chess_policy_value.pt --total-timesteps 100000 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --gamma 0.995 --entropy-coefficient 0.01 --max-plies 300 --evaluation-every 10000 --evaluation-games 100 --checkpoint-every 25000 --device cuda --save-path tmp\full_chess_ppo_random_final.zip --best-model-path tmp\full_chess_ppo_random_best.zip --checkpoint-dir tmp\full_chess_ppo_random_checkpoints --experiment-dir analysis\experiments --experiment-name ppo_random_stable_v1
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full_chess_policy_value.pt --total-timesteps 100000 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 4 --learning-rate 0.0001 --gamma 0.995 --entropy-coefficient 0.01 --max-plies 300 --evaluation-every 10000 --evaluation-games 50 --checkpoint-every 25000 --device cuda --save-path tmp/full_chess_ppo_random_final.zip --best-model-path tmp/full_chess_ppo_random_best.zip --checkpoint-dir tmp/full_chess_ppo_random_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_random_v1
+python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full_chess_policy_value.pt --total-timesteps 100000 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --gamma 0.995 --entropy-coefficient 0.01 --max-plies 300 --evaluation-every 10000 --evaluation-games 100 --checkpoint-every 25000 --device cuda --save-path tmp/full_chess_ppo_random_final.zip --best-model-path tmp/full_chess_ppo_random_best.zip --checkpoint-dir tmp/full_chess_ppo_random_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_random_stable_v1
 ```
 
 학습을 checkpoint에서 이어갈 때 `--total-timesteps`는 추가 학습량이 아니라 목표

@@ -1,5 +1,7 @@
+import csv
 from pathlib import Path
 
+import pytest
 import torch
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.utils import is_masking_supported
@@ -16,6 +18,7 @@ from chess_agent.rl.train_full_chess_ppo import (
     evaluate_full_chess_ppo,
     make_vector_env,
     train_full_chess_ppo,
+    validate_config,
 )
 
 
@@ -87,6 +90,7 @@ def test_full_chess_ppo_smoke_training_saves_logs_and_models(tmp_path: Path) -> 
     assert result.completed_timesteps == 4
     assert result.final_model_path.exists()
     assert result.best_model_path.exists()
+    assert model.target_kl == config.target_kl
     assert result.experiment_run_dir is not None
     assert (result.experiment_run_dir / "summary.json").exists()
     metrics = (result.experiment_run_dir / "metrics.csv").read_text(encoding="utf-8")
@@ -94,6 +98,15 @@ def test_full_chess_ppo_smoke_training_saves_logs_and_models(tmp_path: Path) -> 
     assert "policy_loss" in metrics
     assert "score_rate" in metrics
     assert "final_evaluation" in games
+    with (result.experiment_run_dir / "games.csv").open(
+        encoding="utf-8",
+        newline="",
+    ) as source:
+        game_rows = list(csv.DictReader(source))
+    assert any(
+        row["phase"] == "evaluation" and row["step"] == "0"
+        for row in game_rows
+    )
 
 
 def test_full_chess_ppo_evaluation_uses_only_legal_actions() -> None:
@@ -129,6 +142,11 @@ def test_full_chess_ppo_evaluation_uses_only_legal_actions() -> None:
 
     assert result.episodes == 2
     assert result.illegal_actions == 0
+
+
+def test_full_chess_ppo_rejects_invalid_target_kl() -> None:
+    with pytest.raises(ValueError, match="target_kl"):
+        validate_config(smoke_config(target_kl=0.0))
 
 
 def smoke_config(**overrides: object) -> FullChessPPOConfig:
