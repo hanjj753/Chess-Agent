@@ -8,4 +8,4 @@
 # If your driver/GPU supports a newer CUDA runtime, check the official PyTorch
 # install selector and replace cu126 with the recommended index URL.
 --index-url https://download.pytorch.org/whl/cu126
-torch>=2.3,<3
+torch>=2.8,<3

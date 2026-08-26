@@ -1,6 +1,7 @@
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from typing import Sequence
 
 import chess
@@ -17,6 +18,7 @@ from chess_agent.rl.checkpoints import (
     save_training_checkpoint,
 )
 from chess_agent.rl.evaluate_tactical import evaluate_tactical_policy
+from chess_agent.rl.experiment_tracking import ExperimentLogger
 from chess_agent.rl.observations import board_to_observation
 from chess_agent.rl.policy import (
     POLICY_ARCHITECTURES,
@@ -81,6 +83,8 @@ class TacticalSupervisedTrainingConfig:
     checkpoint_every: int = 0
     best_checkpoint_path: Path | None = None
     resume_from: Path | None = None
+    experiment_dir: Path | None = None
+    experiment_name: str = "tactical_supervised"
 
 
 @dataclass(frozen=True)
@@ -197,6 +201,17 @@ def train_tactical_supervised_policy(
     if config.early_stopping_min_delta < 0:
         raise ValueError("early_stopping_min_delta must be non-negative")
     theme_weights = normalize_theme_weights(config.theme_weights)
+    experiment_logger = (
+        ExperimentLogger.create(
+            config.experiment_dir,
+            experiment_name=config.experiment_name,
+            config=config,
+        )
+        if config.experiment_dir is not None
+        else None
+    )
+    if experiment_logger is not None:
+        print(f"Experiment log: {experiment_logger.run_dir}", flush=True)
 
     torch.manual_seed(config.seed)
     device = torch.device(config.device)
@@ -289,6 +304,9 @@ def train_tactical_supervised_policy(
     stopped_early = False
     last_completed_epoch = completed_epochs
     for epoch in range(completed_epochs + 1, config.epochs + 1):
+        epoch_started_at = time.perf_counter()
+        epoch_loss_sum = 0.0
+        epoch_sample_count = 0
         policy.train()
         for boards, masks, targets in train_loader:
             boards = boards.to(device)
@@ -301,6 +319,14 @@ def train_tactical_supervised_policy(
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            batch_size = targets.shape[0]
+            epoch_loss_sum += float(loss.detach().item()) * batch_size
+            epoch_sample_count += batch_size
+
+        epoch_seconds = time.perf_counter() - epoch_started_at
+        epoch_train_loss = (
+            epoch_loss_sum / epoch_sample_count if epoch_sample_count else 0.0
+        )
 
         train_accuracy = None
         validation_accuracy = None
@@ -308,6 +334,7 @@ def train_tactical_supervised_policy(
         should_track_validation = (
             config.best_checkpoint_path is not None
             or config.early_stopping_patience is not None
+            or experiment_logger is not None
         )
         if should_log or should_track_validation:
             if should_log:
@@ -357,6 +384,34 @@ def train_tactical_supervised_policy(
                     f"best_epoch={format_best_epoch(best_epoch)}",
                     flush=True,
                 )
+            if experiment_logger is not None and validation_accuracy is not None:
+                metrics: dict[str, int | float] = {
+                    "batch_train_loss": epoch_train_loss,
+                    "validation_accuracy": validation_accuracy.accuracy,
+                    "validation_loss": validation_accuracy.average_loss,
+                    "best_validation_accuracy": best_validation_accuracy,
+                    "epochs_without_improvement": epochs_without_improvement,
+                    "epoch_seconds": epoch_seconds,
+                    "samples_per_second": (
+                        epoch_sample_count / epoch_seconds if epoch_seconds else 0.0
+                    ),
+                    "learning_rate": optimizer.param_groups[0]["lr"],
+                }
+                if train_accuracy is not None:
+                    metrics["train_accuracy"] = train_accuracy.accuracy
+                    metrics["train_loss"] = train_accuracy.average_loss
+                experiment_logger.log_metrics(
+                    step=epoch,
+                    phase="train",
+                    metrics=metrics,
+                )
+                if improved and config.best_checkpoint_path is not None:
+                    experiment_logger.log_checkpoint(
+                        step=epoch,
+                        path=config.best_checkpoint_path,
+                        is_best=True,
+                        metrics={"validation_accuracy": validation_accuracy.accuracy},
+                    )
 
         last_completed_epoch = epoch
         if should_save_checkpoint(
@@ -374,6 +429,12 @@ def train_tactical_supervised_policy(
                 epochs_without_improvement=epochs_without_improvement,
                 theme_weights=tuple(theme_weights.items()),
             )
+            if experiment_logger is not None and config.checkpoint_path is not None:
+                experiment_logger.log_checkpoint(
+                    step=epoch,
+                    path=config.checkpoint_path,
+                    is_best=False,
+                )
 
         if (
             config.early_stopping_patience is not None
@@ -427,6 +488,12 @@ def train_tactical_supervised_policy(
 
     if config.save_path is not None:
         save_policy(policy, config.save_path)
+        if experiment_logger is not None:
+            experiment_logger.log_checkpoint(
+                step=last_completed_epoch,
+                path=config.save_path,
+                is_best=False,
+            )
     if config.checkpoint_path is not None:
         save_tactical_supervised_checkpoint(
             config.checkpoint_path,
@@ -438,8 +505,14 @@ def train_tactical_supervised_policy(
             epochs_without_improvement=epochs_without_improvement,
             theme_weights=tuple(theme_weights.items()),
         )
+        if experiment_logger is not None:
+            experiment_logger.log_checkpoint(
+                step=last_completed_epoch,
+                path=config.checkpoint_path,
+                is_best=False,
+            )
 
-    return policy, TacticalSupervisedTrainingResult(
+    result = TacticalSupervisedTrainingResult(
         train_accuracy=train_accuracy,
         validation_accuracy=validation_accuracy,
         validation_puzzle_success_rate=validation_success_rate,
@@ -449,6 +522,20 @@ def train_tactical_supervised_policy(
         completed_epochs=last_completed_epoch,
         stopped_early=stopped_early,
     )
+    if experiment_logger is not None:
+        experiment_logger.log_metrics(
+            step=last_completed_epoch,
+            phase="validation_final",
+            metrics={
+                "train_accuracy": train_accuracy.accuracy,
+                "validation_accuracy": validation_accuracy.accuracy,
+                "validation_puzzle_success_rate": validation_success_rate,
+                "validation_move_accuracy": validation_move_accuracy,
+                "best_validation_accuracy": best_validation_accuracy,
+            },
+        )
+        experiment_logger.save_summary(result)
+    return policy, result
 
 
 def make_train_validation_puzzles(
@@ -631,6 +718,12 @@ def main() -> None:
     parser.add_argument("--checkpoint-every", type=int, default=0)
     parser.add_argument("--best-checkpoint-path", type=Path)
     parser.add_argument("--resume-from", type=Path)
+    parser.add_argument(
+        "--experiment-dir",
+        type=Path,
+        help="base directory for config, metric, game, event, and summary logs",
+    )
+    parser.add_argument("--experiment-name", default="tactical_supervised")
     args = parser.parse_args()
     theme_weights = resolve_cli_theme_weights(
         target_weak_themes=args.target_weak_themes,
@@ -664,6 +757,8 @@ def main() -> None:
             checkpoint_every=args.checkpoint_every,
             best_checkpoint_path=args.best_checkpoint_path,
             resume_from=args.resume_from,
+            experiment_dir=args.experiment_dir,
+            experiment_name=args.experiment_name,
         )
     )
 

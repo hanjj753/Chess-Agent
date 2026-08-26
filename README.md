@@ -12,6 +12,9 @@
 - negamax + alpha-beta pruning + quiescence search + transposition table 기반 에이전트
 - 기물 점수 + piece-square table 기반 평가 함수
 - 잡는 수, 프로모션, 체크를 먼저 보는 단순 move ordering
+- tactical puzzle로 사전학습한 CNN policy
+- history 기반 FullChess Gymnasium 환경과 Policy-Value CNN
+- 설정, epoch별 metric, 대국 결과를 남기는 RL 실험 기록 형식
 
 나중에는 이 탐색 기반 에이전트를 강화학습 에이전트의 상대, 평가 기준,
 데이터 생성기로 사용할 수 있습니다.

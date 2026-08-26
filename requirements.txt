@@ -1,5 +1,7 @@
 python-chess
 gymnasium>=1.1,<2
-torch>=2.3,<3
+torch>=2.8,<3
+stable-baselines3>=2.7,<3
+sb3-contrib>=2.7,<3
 zstandard>=0.23,<1
 pytest

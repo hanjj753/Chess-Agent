@@ -1,7 +1,8 @@
 # RL 실험 메모
 
 이 폴더는 체스 에이전트를 강화학습으로 학습시키기 위한 실험 공간입니다.
-현재 목표는 full chess self-play가 아니라, 작은 `mate-in-1` 퍼즐 환경에서 다음 흐름을 익히는 것입니다.
+작은 `mate-in-1`과 여러 수짜리 tactical puzzle로 기본 policy를 사전학습한 뒤,
+현재는 full-chess actor-critic 학습을 위한 환경과 Policy-Value CNN으로 확장하고 있습니다.
 
 ```text
 Gymnasium 환경
@@ -28,6 +29,164 @@ Gymnasium 환경
 - `tactical_puzzle_env.py`: 여러 수짜리 Lichess tactical line 환경
 - `train_tactical_supervised.py`: 여러 수짜리 tactical puzzle supervised 학습
 - `evaluate_tactical.py`: tactical puzzle 평가용 CLI
+- `full_chess_env.py`: 최근 보드 history와 고정 상대를 사용하는 일반 대국 환경
+- `policy_value.py`: 공유 CNN 위에 policy head와 value head를 둔 모델
+- `initialize_policy_value.py`: tactical CNN checkpoint를 Policy-Value 모델로 변환
+- `experiment_tracking.py`: 설정, 학습 지표, 대국 결과와 checkpoint 이벤트 기록
+- `ppo_policy.py`: 기존 CNN 구조를 사용하는 Stable-Baselines3 maskable policy
+- `train_full_chess_ppo.py`: FullChess Maskable PPO 학습, 평가, checkpoint 기록
+- `evaluate_full_chess_ppo.py`: 저장된 PPO 모델의 독립 대국 평가와 TXT 보고서
+
+## Full-Chess 환경
+
+`FullChessEnv`의 한 `step()`은 agent의 수를 적용한 뒤 상대의 응수까지 진행합니다.
+따라서 step이 정상적으로 끝났다면 다음 observation도 다시 agent 차례입니다.
+상대는 기본 random agent이며 기존 `Agent` 구현을 전달해 교체할 수 있습니다.
+
+기본 `history_length=4`에서는 현재 보드 1개와 직전 보드 4개를 사용합니다.
+각 보드는 기존과 같은 18개 plane이므로 입력 shape은 다음과 같습니다.
+
+```text
+(18 * (4 + 1), 8, 8) = (90, 8, 8)
+```
+
+채널 순서는 `현재 위치 -> 한 ply 전 -> 두 ply 전 -> ...`이며, 게임 초반에
+history가 부족한 부분은 0으로 채웁니다. 환경은 체크메이트와 python-chess의
+무승부 판정을 terminal로 처리하고, `max_plies`에 도달하면 truncate합니다.
+보상은 agent 관점에서 승리 `+1`, 무승부 `0`, 패배 `-1`입니다.
+
+현재 단계에는 FullChess 환경과 모델만 들어 있으며 PPO 학습 루프는 다음 단계에서
+연결합니다. 환경 검증 없이 장시간 self-play부터 시작하지 않기 위한 구분입니다.
+
+## Policy-Value 초기화
+
+Policy-Value CNN은 기존 CNN 몸통을 공유하고 두 출력을 냅니다.
+
+```text
+shared CNN -> policy head: 20,480 action logits
+           -> value head:  -1~1 사이의 현재 위치 가치
+```
+
+기존 tactical CNN의 `input block`, residual backbone, policy head weight를 복사합니다.
+늘어난 history 입력 채널의 첫 convolution weight는 0으로 초기화하므로, 변환 직후
+policy 출력은 기존 tactical CNN과 같습니다. value head는 새로 학습해야 합니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.initialize_policy_value --policy-path tmp\tactical_supervised_cnn_best.pt --output-path tmp\full_chess_policy_value.pt --history-length 4
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.initialize_policy_value --policy-path tmp/tactical_supervised_cnn_best.pt --output-path tmp/full_chess_policy_value.pt --history-length 4
+```
+
+## 실험 과정 기록
+
+학습 명령에 `--experiment-dir`을 지정하면 실행마다 timestamp가 붙은 별도 폴더를
+만듭니다. `--experiment-name`에는 발표에서 구분하기 쉬운 짧은 실험명을 적습니다.
+
+Windows PowerShell 예시:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.train_tactical_supervised --puzzles-file data\puzzle_processed\tactical_train.txt --validation-file data\puzzle_processed\tactical_valid.txt --epochs 500 --batch-size 256 --architecture cnn --hidden-size 64 --residual-blocks 3 --dropout 0.1 --learning-rate 0.0003 --weight-decay 0.0001 --patience 15 --device cuda --save-path tmp\tactical_supervised_cnn.pt --best-checkpoint-path tmp\tactical_supervised_cnn_best.pt --experiment-dir analysis\experiments --experiment-name tactical_baseline
+```
+
+Linux 예시:
+
+```bash
+python -m chess_agent.rl.train_tactical_supervised --puzzles-file data/puzzle_processed/tactical_train.txt --validation-file data/puzzle_processed/tactical_valid.txt --epochs 500 --batch-size 256 --architecture cnn --hidden-size 64 --residual-blocks 3 --dropout 0.1 --learning-rate 0.0003 --weight-decay 0.0001 --patience 15 --device cuda --save-path tmp/tactical_supervised_cnn.pt --best-checkpoint-path tmp/tactical_supervised_cnn_best.pt --experiment-dir analysis/experiments --experiment-name tactical_baseline
+```
+
+생성되는 파일은 다음과 같습니다.
+
+- `config.json`: hyperparameter, 데이터 경로, 모델 설정
+- `metrics.csv`: epoch/step별 loss, accuracy, reward, 승률 등의 긴 형식 데이터
+- `games.csv`: episode별 승패, 색, reward, ply, 종료 원인
+- `events.jsonl`: best checkpoint 저장 같은 시간 순서 이벤트
+- `summary.json`: 실험 종료 시점의 최종 요약
+
+현재 tactical trainer는 `config.json`, `metrics.csv`, `events.jsonl`, `summary.json`을
+기록합니다. `games.csv`는 파일 형식을 미리 생성하고, 다음 FullChess 학습기에서
+각 self-play 결과를 기록할 때 사용합니다. `metrics.csv`가 긴 형식이므로 pandas,
+Excel 또는 발표용 그래프 코드에서 `step`, `metric`, `value` 열을 바로 사용할 수 있습니다.
+
+## Full-Chess Maskable PPO
+
+PPO의 clipping, GAE, minibatch update는 직접 구현하지 않고 `sb3-contrib`의
+`MaskablePPO`를 사용합니다. 환경의 `action_masks()`가 불법 수를 제거하며,
+custom policy가 프로젝트의 residual CNN과 Policy-Value head를 연결합니다.
+공식 사용법은 [Maskable PPO 문서](https://sb3-contrib.readthedocs.io/en/master/modules/ppo_mask.html)를 참고합니다.
+
+먼저 짧은 smoke 학습으로 서버 환경과 저장 경로를 확인합니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp\full_chess_policy_value.pt --total-timesteps 4096 --n-envs 1 --n-steps 256 --batch-size 256 --n-epochs 2 --max-plies 100 --evaluation-every 2048 --evaluation-games 10 --checkpoint-every 2048 --device cuda --experiment-name ppo_smoke
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full_chess_policy_value.pt --total-timesteps 4096 --n-envs 1 --n-steps 256 --batch-size 256 --n-epochs 2 --max-plies 100 --evaluation-every 2048 --evaluation-games 10 --checkpoint-every 2048 --device cuda --experiment-name ppo_smoke
+```
+
+smoke run이 끝나면 random 상대 첫 본 학습을 실행합니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp\full_chess_policy_value.pt --total-timesteps 100000 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 4 --learning-rate 0.0001 --gamma 0.995 --entropy-coefficient 0.01 --max-plies 300 --evaluation-every 10000 --evaluation-games 50 --checkpoint-every 25000 --device cuda --save-path tmp\full_chess_ppo_random_final.zip --best-model-path tmp\full_chess_ppo_random_best.zip --checkpoint-dir tmp\full_chess_ppo_random_checkpoints --experiment-dir analysis\experiments --experiment-name ppo_random_v1
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full_chess_policy_value.pt --total-timesteps 100000 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 4 --learning-rate 0.0001 --gamma 0.995 --entropy-coefficient 0.01 --max-plies 300 --evaluation-every 10000 --evaluation-games 50 --checkpoint-every 25000 --device cuda --save-path tmp/full_chess_ppo_random_final.zip --best-model-path tmp/full_chess_ppo_random_best.zip --checkpoint-dir tmp/full_chess_ppo_random_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_random_v1
+```
+
+학습을 checkpoint에서 이어갈 때 `--total-timesteps`는 추가 학습량이 아니라 목표
+누적 timestep입니다. PPO 구조와 optimizer 상태는 ZIP에서 복원됩니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp\full_chess_ppo_random_checkpoints\full_chess_ppo_100000.zip --total-timesteps 500000 --n-envs 4 --n-steps 256 --batch-size 256 --evaluation-every 10000 --evaluation-games 50 --checkpoint-every 25000 --device cuda --save-path tmp\full_chess_ppo_random_final.zip --best-model-path tmp\full_chess_ppo_random_best.zip --checkpoint-dir tmp\full_chess_ppo_random_checkpoints --experiment-dir analysis\experiments --experiment-name ppo_random_v1_resume
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_random_checkpoints/full_chess_ppo_100000.zip --total-timesteps 500000 --n-envs 4 --n-steps 256 --batch-size 256 --evaluation-every 10000 --evaluation-games 50 --checkpoint-every 25000 --device cuda --save-path tmp/full_chess_ppo_random_final.zip --best-model-path tmp/full_chess_ppo_random_best.zip --checkpoint-dir tmp/full_chess_ppo_random_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_random_v1_resume
+```
+
+독립 평가 결과는 TXT로 저장할 수 있습니다. history 길이는 checkpoint 입력 shape에서
+자동으로 알아냅니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_random_best.zip --games 100 --opponent random --max-plies 300 --device cuda --output-path analysis\full_chess_ppo_random.txt
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_random_best.zip --games 100 --opponent random --max-plies 300 --device cuda --output-path analysis/full_chess_ppo_random.txt
+```
+
+평가 상대를 기존 tree agent로 바꾸려면 `--opponent alpha --opponent-depth 1`을
+사용합니다. 학습 상대에도 같은 옵션을 쓸 수 있지만 random보다 환경 step이 훨씬
+느려지므로 첫 실험은 random으로 진행합니다.
+
+발표용으로 우선 볼 지표는 `evaluation/score_rate`, W/D/L, `average_plies`, 종료 원인,
+`value_loss`, `entropy`, `approx_kl`, `clip_fraction`입니다. `policy_loss`는 부호나
+절댓값이 직접 실력을 뜻하지 않으므로 단독으로 해석하지 않습니다. 특히
+`max_plies` 종료가 많아 생긴 무승부 50%는 실력 향상이 아니므로 `games.csv`와 독립
+평가 TXT의 `Termination breakdown`을 반드시 함께 봅니다.
 
 ## 설치
 

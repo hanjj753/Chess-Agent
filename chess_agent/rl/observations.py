@@ -2,6 +2,7 @@ import numpy as np
 import chess
 
 OBSERVATION_SHAPE = (18, 8, 8) # 8*8 체스판 x (6-자기 폰, 나이트, 비숍, 룩, 퀸, 킹 위치)+(6-상대기물위치) + (4-캐슬링 권리) + (2-앙파상, 차례)
+OBSERVATION_CHANNELS = OBSERVATION_SHAPE[0]
 
 PIECE_PLANES = {
     chess.Piece(chess.PAWN, chess.WHITE): 0,
@@ -44,5 +45,31 @@ def board_to_observation(board: chess.Board) -> np.ndarray:
         rank = chess.square_rank(board.ep_square)
         file_index = chess.square_file(board.ep_square)
         observation[17, rank, file_index] = 1
+
+    return observation
+
+
+def history_observation_shape(history_length: int) -> tuple[int, int, int]:
+    """Return the shape for the current board plus previous board positions."""
+    if history_length < 0:
+        raise ValueError("history_length must be non-negative")
+    return (OBSERVATION_CHANNELS * (history_length + 1), 8, 8)
+
+
+def boards_to_history_observation(
+    boards: list[chess.Board] | tuple[chess.Board, ...],
+    *,
+    history_length: int,
+) -> np.ndarray:
+    """Encode current and previous boards, newest first, with zero padding."""
+    shape = history_observation_shape(history_length)
+    observation = np.zeros(shape, dtype=np.int8)
+    frames = tuple(boards)[-(history_length + 1) :]
+
+    for frame_index, board in enumerate(reversed(frames)):
+        start = frame_index * OBSERVATION_CHANNELS
+        observation[start : start + OBSERVATION_CHANNELS] = board_to_observation(
+            board
+        )
 
     return observation

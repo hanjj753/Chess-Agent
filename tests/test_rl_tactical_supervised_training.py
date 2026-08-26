@@ -98,6 +98,39 @@ def test_tactical_supervised_training_runs_and_saves_policy(tmp_path: Path) -> N
     assert 0 <= result.validation_puzzle_success_rate <= 1
 
 
+def test_tactical_training_can_write_experiment_records(tmp_path: Path) -> None:
+    puzzles_path = write_tactical_file(tmp_path, "train.txt", [make_tactical_puzzle()])
+    validation_path = write_tactical_file(
+        tmp_path,
+        "valid.txt",
+        [make_second_tactical_puzzle()],
+    )
+    experiment_dir = tmp_path / "experiments"
+
+    train_tactical_supervised_policy(
+        TacticalSupervisedTrainingConfig(
+            puzzles_file=puzzles_path,
+            validation_file=validation_path,
+            epochs=1,
+            batch_size=2,
+            architecture="mlp",
+            hidden_size=16,
+            dropout=0.0,
+            log_every=0,
+            experiment_dir=experiment_dir,
+            experiment_name="test tactical",
+        )
+    )
+
+    run_dirs = list(experiment_dir.iterdir())
+    assert len(run_dirs) == 1
+    assert (run_dirs[0] / "config.json").exists()
+    assert "validation_accuracy" in (run_dirs[0] / "metrics.csv").read_text(
+        encoding="utf-8"
+    )
+    assert (run_dirs[0] / "summary.json").exists()
+
+
 def test_tactical_supervised_training_can_resume_from_checkpoint(tmp_path: Path) -> None:
     puzzles_path = write_tactical_file(tmp_path, "train.txt", [make_tactical_puzzle()])
     validation_path = write_tactical_file(tmp_path, "valid.txt", [make_second_tactical_puzzle()])
