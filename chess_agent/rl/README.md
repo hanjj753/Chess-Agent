@@ -187,18 +187,29 @@ resume 학습에서는 step 0 대신 checkpoint의 누적 timestep에서 baselin
 조기 종료합니다. 전체 학습을 끝내는 옵션은 아닙니다. 기본값은 `0.03`이며 안전장치를
 끄려면 `--no-target-kl`, step 0 평가를 끄려면 `--no-initial-evaluation`을 사용합니다.
 
+PPO에서는 rollout을 모을 때와 update할 때 같은 weight가 같은 action probability를
+출력해야 합니다. 일반적인 train mode의 Dropout과 BatchNorm은 이 조건을 깨뜨리므로
+PPO policy에서는 Dropout을 `0`으로 고정하고 BatchNorm running statistics를 업데이트하지
+않습니다. convolution, linear, BatchNorm의 affine weight와 bias는 계속 gradient로
+학습됩니다. Tactical supervised 모델의 Dropout은 그대로 두며, PPO 모델로 복사한 뒤에만
+이 규칙을 적용합니다. `--dropout`에 0이 아닌 값을 주면 학습 시작 전에 오류를 냅니다.
+
+같은 seed의 `step=0`, 주기 evaluation만 best checkpoint 선택에 사용합니다. 다른 seed를
+사용하는 `final_evaluation`은 독립 확인용이며 점수율이 더 높아도 best 모델을 덮어쓰지
+않습니다.
+
 먼저 짧은 smoke 학습으로 서버 환경과 저장 경로를 확인합니다.
 
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp\full_chess_policy_value.pt --total-timesteps 4096 --n-envs 1 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 2048 --evaluation-games 50 --checkpoint-every 2048 --device cuda --save-path tmp\full_chess_ppo_stability_lr3e5_final.zip --best-model-path tmp\full_chess_ppo_stability_lr3e5_best.zip --checkpoint-dir tmp\full_chess_ppo_stability_lr3e5_checkpoints --experiment-name ppo_stability_lr3e5
+.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp\full_chess_policy_value.pt --total-timesteps 4096 --n-envs 1 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 2048 --evaluation-games 50 --checkpoint-every 2048 --device cuda --save-path tmp\full_chess_ppo_modefix_lr3e5_final.zip --best-model-path tmp\full_chess_ppo_modefix_lr3e5_best.zip --checkpoint-dir tmp\full_chess_ppo_modefix_lr3e5_checkpoints --experiment-name ppo_modefix_lr3e5
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full_chess_policy_value.pt --total-timesteps 4096 --n-envs 1 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 2048 --evaluation-games 50 --checkpoint-every 2048 --device cuda --save-path tmp/full_chess_ppo_stability_lr3e5_final.zip --best-model-path tmp/full_chess_ppo_stability_lr3e5_best.zip --checkpoint-dir tmp/full_chess_ppo_stability_lr3e5_checkpoints --experiment-name ppo_stability_lr3e5
+python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full_chess_policy_value.pt --total-timesteps 4096 --n-envs 1 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 2048 --evaluation-games 50 --checkpoint-every 2048 --device cuda --save-path tmp/full_chess_ppo_modefix_lr3e5_final.zip --best-model-path tmp/full_chess_ppo_modefix_lr3e5_best.zip --checkpoint-dir tmp/full_chess_ppo_modefix_lr3e5_checkpoints --experiment-name ppo_modefix_lr3e5
 ```
 
 이 실험에서는 기존 smoke run과 나머지 핵심 설정을 유지하면서 learning rate를

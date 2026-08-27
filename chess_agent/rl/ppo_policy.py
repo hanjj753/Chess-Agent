@@ -85,7 +85,7 @@ class ChessMaskableActorCriticPolicy(MaskableActorCriticPolicy):
         self,
         *args: Any,
         hidden_size: int = 64,
-        dropout: float = 0.1,
+        dropout: float = 0.0,
         residual_blocks: int = 3,
         **kwargs: Any,
     ) -> None:
@@ -102,6 +102,13 @@ class ChessMaskableActorCriticPolicy(MaskableActorCriticPolicy):
         kwargs["normalize_images"] = False
         kwargs["ortho_init"] = False
         super().__init__(*args, **kwargs)
+
+    def set_training_mode(self, mode: bool) -> None:
+        """Keep on-policy probabilities stable across rollout and update modes."""
+        super().set_training_mode(mode)
+        for module in self.modules():
+            if isinstance(module, (nn.BatchNorm2d, nn.Dropout, nn.Dropout2d)):
+                module.eval()
 
     def _build_mlp_extractor(self) -> None:
         self.mlp_extractor = ChessPolicyValueExtractor(

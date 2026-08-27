@@ -44,7 +44,7 @@ class FullChessPPOConfig:
     history_length: int = 4
     max_plies: int = 300
     hidden_size: int = 64
-    dropout: float = 0.1
+    dropout: float = 0.0
     residual_blocks: int = 3
     opponent: str = "random"
     opponent_depth: int = 1
@@ -306,7 +306,7 @@ def train_full_chess_ppo(
                     device="cpu",
                 )
                 hidden_size = pretrained_model.hidden_size
-                dropout = pretrained_model.dropout_rate
+                dropout = config.dropout
                 residual_blocks = pretrained_model.residual_blocks
             else:
                 hidden_size = config.hidden_size
@@ -395,10 +395,7 @@ def train_full_chess_ppo(
             seed=config.seed + 200_000,
         )
         best_model_path = normalized_ppo_path(config.best_model_path)
-        if (
-            not callback.saved_best_this_run
-            or final_evaluation.score_rate > callback.best_score_rate
-        ):
+        if not callback.saved_best_this_run:
             callback.best_score_rate = final_evaluation.score_rate
             best_model_path = save_ppo_model(model, best_model_path)
             callback.saved_best_this_run = True
@@ -643,6 +640,8 @@ def validate_config(config: FullChessPPOConfig) -> None:
         not math.isfinite(config.target_kl) or config.target_kl <= 0
     ):
         raise ValueError("target_kl must be positive or None")
+    if config.dropout != 0:
+        raise ValueError("PPO requires dropout=0 for stable probability ratios")
     if config.history_length < 0 or config.max_plies < 1:
         raise ValueError("invalid history_length or max_plies")
     if config.evaluation_every < 0 or config.checkpoint_every < 0:
@@ -679,7 +678,7 @@ def main() -> None:
     parser.add_argument("--history-length", type=int, default=4)
     parser.add_argument("--max-plies", type=int, default=300)
     parser.add_argument("--hidden-size", type=int, default=64)
-    parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--residual-blocks", type=int, default=3)
     parser.add_argument("--opponent", choices=PPO_OPPONENTS, default="random")
     parser.add_argument("--opponent-depth", type=int, default=1)
