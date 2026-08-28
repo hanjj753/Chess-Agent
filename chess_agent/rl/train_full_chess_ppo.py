@@ -50,7 +50,7 @@ class FullChessPPOConfig:
     opponent_depth: int = 1
     opponent_time_limit: float | None = None
     evaluation_every: int = 10_000
-    evaluation_games: int = 50
+    evaluation_games: int = 200
     checkpoint_every: int = 50_000
     deterministic_evaluation: bool = True
     initial_evaluation: bool = True
@@ -60,6 +60,7 @@ class FullChessPPOConfig:
     resume_from: Path | None = None
     save_path: Path = Path("tmp/full_chess_ppo_final.zip")
     checkpoint_dir: Path = Path("tmp/full_chess_ppo_checkpoints")
+    initial_model_path: Path = Path("tmp/full_chess_ppo_initial.zip")
     best_model_path: Path = Path("tmp/full_chess_ppo_best.zip")
     experiment_dir: Path | None = Path("analysis/experiments")
     experiment_name: str = "full_chess_ppo"
@@ -122,6 +123,7 @@ class FullChessEvaluationResult:
 @dataclass(frozen=True)
 class FullChessPPOTrainingResult:
     completed_timesteps: int
+    initial_model_path: Path
     final_model_path: Path
     best_model_path: Path
     experiment_run_dir: Path | None
@@ -349,6 +351,12 @@ def train_full_chess_ppo(
             )
 
         remaining_timesteps = config.total_timesteps - model.num_timesteps
+        initial_model_path = save_ppo_model(model, config.initial_model_path)
+        if experiment_logger is not None:
+            experiment_logger.log_checkpoint(
+                step=model.num_timesteps,
+                path=initial_model_path,
+            )
         callback = FullChessTrainingCallback(
             config=config,
             experiment_logger=experiment_logger,
@@ -422,6 +430,7 @@ def train_full_chess_ppo(
 
         result = FullChessPPOTrainingResult(
             completed_timesteps=model.num_timesteps,
+            initial_model_path=initial_model_path,
             final_model_path=final_model_path,
             best_model_path=best_model_path,
             experiment_run_dir=(
@@ -684,7 +693,7 @@ def main() -> None:
     parser.add_argument("--opponent-depth", type=int, default=1)
     parser.add_argument("--opponent-time-limit", type=float)
     parser.add_argument("--evaluation-every", type=int, default=10_000)
-    parser.add_argument("--evaluation-games", type=int, default=50)
+    parser.add_argument("--evaluation-games", type=int, default=200)
     parser.add_argument("--checkpoint-every", type=int, default=50_000)
     parser.add_argument("--stochastic-evaluation", action="store_true")
     parser.add_argument("--no-initial-evaluation", action="store_true")
@@ -697,6 +706,11 @@ def main() -> None:
         "--checkpoint-dir",
         type=Path,
         default=Path("tmp/full_chess_ppo_checkpoints"),
+    )
+    parser.add_argument(
+        "--initial-model-path",
+        type=Path,
+        default=Path("tmp/full_chess_ppo_initial.zip"),
     )
     parser.add_argument(
         "--best-model-path",
@@ -745,6 +759,7 @@ def main() -> None:
             resume_from=args.resume_from,
             save_path=args.save_path,
             checkpoint_dir=args.checkpoint_dir,
+            initial_model_path=args.initial_model_path,
             best_model_path=args.best_model_path,
             experiment_dir=args.experiment_dir,
             experiment_name=args.experiment_name,
@@ -754,6 +769,7 @@ def main() -> None:
     print()
     print("Full-chess PPO training summary")
     print(f"Timesteps:       {result.completed_timesteps}")
+    print(f"Initial model:   {result.initial_model_path}")
     print(f"Final model:     {result.final_model_path}")
     print(f"Best model:      {result.best_model_path}")
     print(f"Evaluation W/D/L: {result.final_evaluation.wins}/"

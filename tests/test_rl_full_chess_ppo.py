@@ -149,6 +149,7 @@ def test_full_chess_ppo_smoke_training_saves_logs_and_models(tmp_path: Path) -> 
         checkpoint_every=4,
         experiment_dir=tmp_path / "experiments",
         save_path=tmp_path / "final.zip",
+        initial_model_path=tmp_path / "initial.zip",
         best_model_path=tmp_path / "best.zip",
         checkpoint_dir=tmp_path / "checkpoints",
     )
@@ -157,6 +158,7 @@ def test_full_chess_ppo_smoke_training_saves_logs_and_models(tmp_path: Path) -> 
 
     assert isinstance(model, MaskablePPO)
     assert result.completed_timesteps == 4
+    assert result.initial_model_path.exists()
     assert result.final_model_path.exists()
     assert result.best_model_path.exists()
     assert model.target_kl == config.target_kl

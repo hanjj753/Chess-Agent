@@ -300,9 +300,9 @@ def build_warnings(
         )
 
     evaluation_sizes = [len(games) for _, games in evaluation_groups]
-    if evaluation_sizes and min(evaluation_sizes) < 50:
+    if evaluation_sizes and min(evaluation_sizes) < 200:
         warnings.append(
-            "평가 대국이 50판보다 적은 시점이 있어 한두 판 차이에 점수율이 크게 흔들릴 수 있습니다."
+            "평가 대국이 200판보다 적은 시점이 있어 checkpoint 선택이 표본 변동에 흔들릴 수 있습니다."
         )
 
     final_groups = [

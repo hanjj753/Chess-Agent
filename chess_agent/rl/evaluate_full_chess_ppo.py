@@ -1,5 +1,6 @@
 import argparse
 from collections import Counter
+import csv
 from pathlib import Path
 
 from chess_agent.rl.observations import OBSERVATION_CHANNELS
@@ -16,6 +17,9 @@ def format_full_chess_report(
     model_path: str | Path,
     opponent: str,
     result: FullChessEvaluationResult,
+    seed: int | None = None,
+    deterministic: bool | None = None,
+    max_plies: int | None = None,
 ) -> str:
     lines = [
         "Full-chess PPO evaluation",
@@ -27,10 +31,14 @@ def format_full_chess_report(
         f"Average reward: {result.average_reward:.3f}",
         f"Average plies:  {result.average_plies:.1f}",
         f"Illegal moves:  {result.illegal_actions}",
-        "",
-        "Color breakdown",
-        "Color   Games   W/D/L   Score",
     ]
+    if seed is not None:
+        lines.append(f"Base seed:      {seed}")
+    if deterministic is not None:
+        lines.append(f"Deterministic:  {'yes' if deterministic else 'no'}")
+    if max_plies is not None:
+        lines.append(f"Max plies:      {max_plies}")
+    lines.extend(["", "Color breakdown", "Color   Games   W/D/L   Score"])
     for color in ("white", "black"):
         games = tuple(game for game in result.games if game.agent_color == color)
         wins = sum(game.reward > 0 for game in games)
@@ -68,6 +76,52 @@ def save_report(path: str | Path, report: str) -> Path:
     return output_path
 
 
+def save_game_results_csv(
+    path: str | Path,
+    *,
+    result: FullChessEvaluationResult,
+    base_seed: int,
+) -> Path:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8", newline="") as output:
+        writer = csv.DictWriter(
+            output,
+            fieldnames=(
+                "episode",
+                "seed",
+                "agent_color",
+                "result",
+                "reward",
+                "score",
+                "plies",
+                "termination",
+                "illegal_action",
+            ),
+        )
+        writer.writeheader()
+        for game in result.games:
+            writer.writerow(
+                {
+                    "episode": game.episode,
+                    "seed": base_seed + game.episode - 1,
+                    "agent_color": game.agent_color,
+                    "result": game.result,
+                    "reward": game.reward,
+                    "score": (game.reward + 1.0) / 2.0,
+                    "plies": game.plies,
+                    "termination": game.termination,
+                    "illegal_action": game.illegal_action,
+                }
+            )
+    return output_path
+
+
+def default_games_output_path(report_path: str | Path) -> Path:
+    path = Path(report_path)
+    return path.with_name(f"{path.stem}_games.csv")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-path", type=Path, required=True)
@@ -81,6 +135,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--output-path", type=Path)
+    parser.add_argument("--games-output-path", type=Path)
     args = parser.parse_args()
 
     model = TrackedMaskablePPO.load(args.model_path, device=args.device)
@@ -104,11 +159,24 @@ def main() -> None:
         model_path=args.model_path,
         opponent=args.opponent,
         result=result,
+        seed=args.seed,
+        deterministic=not args.stochastic,
+        max_plies=args.max_plies,
     )
     print(report, end="")
     if args.output_path is not None:
         saved_path = save_report(args.output_path, report)
         print(f"Saved report:   {saved_path}")
+    games_output_path = args.games_output_path
+    if games_output_path is None and args.output_path is not None:
+        games_output_path = default_games_output_path(args.output_path)
+    if games_output_path is not None:
+        saved_games_path = save_game_results_csv(
+            games_output_path,
+            result=result,
+            base_seed=args.seed,
+        )
+        print(f"Saved games:    {saved_games_path}")
 
 
 if __name__ == "__main__":
