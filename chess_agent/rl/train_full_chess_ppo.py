@@ -189,6 +189,7 @@ class FullChessTrainingCallback(BaseCallback):
         self.saved_best_this_run = False
         self.next_evaluation = 0
         self.next_checkpoint = 0
+        self.rollout_game_rewards: list[float] = []
 
     def _on_training_start(self) -> None:
         self.next_evaluation = next_interval(
@@ -198,6 +199,44 @@ class FullChessTrainingCallback(BaseCallback):
         self.next_checkpoint = next_interval(
             self.num_timesteps,
             self.config.checkpoint_every,
+        )
+
+    def _on_rollout_start(self) -> None:
+        self.rollout_game_rewards = []
+
+    def _on_rollout_end(self) -> None:
+        if self.experiment_logger is None:
+            return
+
+        rollout_buffer = getattr(self.model, "rollout_buffer", None)
+        if rollout_buffer is None:
+            return
+
+        rewards = np.asarray(rollout_buffer.rewards, dtype=np.float64)
+        returns = np.asarray(rollout_buffer.returns, dtype=np.float64)
+        values = np.asarray(rollout_buffer.values, dtype=np.float64)
+        advantages = np.asarray(rollout_buffer.advantages, dtype=np.float64)
+        transitions = int(rewards.size)
+        completed_games = len(self.rollout_game_rewards)
+        decisive_games = sum(
+            not math.isclose(reward, 0.0)
+            for reward in self.rollout_game_rewards
+        )
+
+        self.experiment_logger.log_metrics(
+            step=self.num_timesteps,
+            phase="rollout",
+            metrics={
+                "transitions": transitions,
+                "completed_games": completed_games,
+                "decisive_games": decisive_games,
+                "reward_signal_rate": (
+                    decisive_games / transitions if transitions else 0.0
+                ),
+                "return_std": float(np.std(returns)),
+                "value_prediction_std": float(np.std(values)),
+                "advantage_std": float(np.std(advantages)),
+            },
         )
 
     def _on_step(self) -> bool:
@@ -262,6 +301,7 @@ class FullChessTrainingCallback(BaseCallback):
             self.training_episode += 1
             episode_info = info.get("episode", {})
             reward = float(episode_info.get("r", 0.0))
+            self.rollout_game_rewards.append(reward)
             self.experiment_logger.log_game(
                 step=self.num_timesteps,
                 phase="train",

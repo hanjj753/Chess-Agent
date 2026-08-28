@@ -236,6 +236,49 @@ python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full
 두 실험에서 `approx_kl`, `clip_fraction`, `explained_variance`, 같은-seed 평가 점수율을
 비교한 뒤 장기 학습의 learning rate를 선택합니다.
 
+실제 500판 paired 평가에서는 `3e-5` final이 initial과 통계적으로 동률이었고,
+`1e-4` final은 유의하게 낮았습니다. 따라서 다음 실험은 learning rate를 `3e-5`로
+고정하고 rollout 크기만 비교합니다. 새 버전은 rollout마다 완결 대국 수, 승패 대국 수,
+reward 신호 비율, return/value/advantage 표준편차를 `metrics.csv`에 기록합니다.
+
+### Rollout 크기 A/B
+
+두 실험은 모두 16,384 timestep을 사용합니다. A는 `1 x 256 = 256` transition마다
+update하고, B는 `4 x 256 = 1,024` transition마다 update합니다. A를 다시 실행하는
+이유는 이전 실험에는 새 rollout 진단값이 기록되지 않았기 때문입니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp\full_chess_policy_value.pt --total-timesteps 16384 --n-envs 1 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 8192 --evaluation-games 200 --checkpoint-every 8192 --seed 0 --device cuda --initial-model-path tmp\full_chess_ppo_rollout256_initial.zip --save-path tmp\full_chess_ppo_rollout256_final.zip --best-model-path tmp\full_chess_ppo_rollout256_best.zip --checkpoint-dir tmp\full_chess_ppo_rollout256_checkpoints --experiment-name ppo_rollout256
+.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp\full_chess_policy_value.pt --total-timesteps 16384 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 8192 --evaluation-games 200 --checkpoint-every 8192 --seed 0 --device cuda --initial-model-path tmp\full_chess_ppo_rollout1024_initial.zip --save-path tmp\full_chess_ppo_rollout1024_final.zip --best-model-path tmp\full_chess_ppo_rollout1024_best.zip --checkpoint-dir tmp\full_chess_ppo_rollout1024_checkpoints --experiment-name ppo_rollout1024
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full_chess_policy_value.pt --total-timesteps 16384 --n-envs 1 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 8192 --evaluation-games 200 --checkpoint-every 8192 --seed 0 --device cuda --initial-model-path tmp/full_chess_ppo_rollout256_initial.zip --save-path tmp/full_chess_ppo_rollout256_final.zip --best-model-path tmp/full_chess_ppo_rollout256_best.zip --checkpoint-dir tmp/full_chess_ppo_rollout256_checkpoints --experiment-name ppo_rollout256
+python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full_chess_policy_value.pt --total-timesteps 16384 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 8192 --evaluation-games 200 --checkpoint-every 8192 --seed 0 --device cuda --initial-model-path tmp/full_chess_ppo_rollout1024_initial.zip --save-path tmp/full_chess_ppo_rollout1024_final.zip --best-model-path tmp/full_chess_ppo_rollout1024_best.zip --checkpoint-dir tmp/full_chess_ppo_rollout1024_checkpoints --experiment-name ppo_rollout1024
+```
+
+각 학습 직후 다음 명령을 실행하면 가장 최근 실험의 `report/summary.txt`와 그래프가
+생성됩니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.report_experiment analysis\experiments
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.report_experiment analysis/experiments
+```
+
+두 실험에서는 평가 점수뿐 아니라 `completed_games`, `decisive_games`,
+`reward_signal_rate`, `explained_variance`를 함께 비교합니다.
+
 smoke run에서 KL과 clipping이 충분히 내려간 것을 확인한 뒤 random 상대 첫 본 학습을
 실행합니다. 아직 불안정하면 본 학습으로 넘어가지 않고 `0.00001` learning rate를 같은
 조건으로 비교합니다.

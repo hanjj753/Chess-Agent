@@ -35,6 +35,19 @@ def test_generate_experiment_report_from_latest_experiment(
             "explained_variance": -0.2,
         },
     )
+    logger.log_metrics(
+        step=256,
+        phase="rollout",
+        metrics={
+            "transitions": 256,
+            "completed_games": 4,
+            "decisive_games": 2,
+            "reward_signal_rate": 0.0078125,
+            "return_std": 0.4,
+            "value_prediction_std": 0.1,
+            "advantage_std": 0.5,
+        },
+    )
     logger.log_game(
         step=20,
         phase="train",
@@ -90,3 +103,6 @@ def test_generate_experiment_report_from_latest_experiment(
     assert "W/D/L:           1/1/0" in report
     assert "평균 approx_kl이 target_kl의 1.5배인 0.0450보다 큽니다." in report
     assert "Critic이 아직 유용한 value 예측을 하지 못합니다." in report
+    assert "완결 대국 수" in report
+    assert "rollout당 완결 대국이 평균 8판보다 적어" in report
+    assert "reward가 0이 아닌 transition이 평균 1%보다 적어" in report

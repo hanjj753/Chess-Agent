@@ -193,9 +193,23 @@ def test_full_chess_ppo_smoke_training_saves_logs_and_models(tmp_path: Path) -> 
         for row in metric_rows
         if row["metric"] == "clip_fraction"
     ]
+    rollout_metric_names = {
+        row["metric"]
+        for row in metric_rows
+        if row["phase"] == "rollout"
+    }
     assert update_kl
     assert max(update_kl) < 1.5 * config.target_kl
     assert clip_fractions and max(clip_fractions) < 0.5
+    assert {
+        "transitions",
+        "completed_games",
+        "decisive_games",
+        "reward_signal_rate",
+        "return_std",
+        "value_prediction_std",
+        "advantage_std",
+    } <= rollout_metric_names
 
     events = [
         json.loads(line)

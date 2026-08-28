@@ -175,6 +175,19 @@ def build_text_report(data: ExperimentData) -> str:
         name: metric_values(data.metrics, phase="train_update", metric=name)
         for name in diagnostic_names
     }
+    rollout_names = (
+        "transitions",
+        "completed_games",
+        "decisive_games",
+        "reward_signal_rate",
+        "return_std",
+        "value_prediction_std",
+        "advantage_std",
+    )
+    rollout_diagnostics = {
+        name: metric_values(data.metrics, phase="rollout", metric=name)
+        for name in rollout_names
+    }
 
     lines = [
         "Full-Chess PPO 실험 자동 보고서",
@@ -250,7 +263,43 @@ def build_text_report(data: ExperimentData) -> str:
             f"last={values[-1]:9.4f}"
         )
 
-    warnings = build_warnings(data, evaluation_groups, diagnostics)
+    lines.extend(["", "Rollout과 Critic 입력", "-------------------"])
+    rollout_labels = {
+        "transitions": "transition 수",
+        "completed_games": "완결 대국 수",
+        "decisive_games": "승패 대국 수",
+        "reward_signal_rate": "reward 신호 비율",
+        "return_std": "return 표준편차",
+        "value_prediction_std": "value 예측 표준편차",
+        "advantage_std": "advantage 표준편차",
+    }
+    has_rollout_metrics = False
+    for name in rollout_names:
+        values = rollout_diagnostics[name]
+        if not values:
+            continue
+        has_rollout_metrics = True
+        if name == "reward_signal_rate":
+            lines.append(
+                f"{rollout_labels[name]:20s} avg={mean(values):8.2%} "
+                f"min={min(values):8.2%} max={max(values):8.2%} "
+                f"last={values[-1]:8.2%}"
+            )
+        else:
+            lines.append(
+                f"{rollout_labels[name]:20s} avg={mean(values):9.3f} "
+                f"min={min(values):9.3f} max={max(values):9.3f} "
+                f"last={values[-1]:9.3f}"
+            )
+    if not has_rollout_metrics:
+        lines.append("이 실험에는 rollout 진단 기록이 없습니다.")
+
+    warnings = build_warnings(
+        data,
+        evaluation_groups,
+        diagnostics,
+        rollout_diagnostics,
+    )
     lines.extend(
         [
             "",
@@ -273,7 +322,8 @@ def build_text_report(data: ExperimentData) -> str:
             "2. max_plies 무승부가 줄고 checkmate 승리가 늘어나는가?",
             "3. approx_kl과 clip_fraction이 지나치게 크지 않은가?",
             "4. explained_variance가 0보다 높아지며 Critic이 학습되는가?",
-            "5. illegal action이 항상 0인가?",
+            "5. rollout마다 완결/승패 대국과 reward 신호가 충분히 들어오는가?",
+            "6. illegal action이 항상 0인가?",
             "",
         ]
     )
@@ -284,6 +334,7 @@ def build_warnings(
     data: ExperimentData,
     evaluation_groups: list[tuple[tuple[str, int], tuple[GameRow, ...]]],
     diagnostics: dict[str, list[float]],
+    rollout_diagnostics: dict[str, list[float]],
 ) -> list[str]:
     warnings: list[str] = []
     periodic_steps = [
@@ -344,6 +395,17 @@ def build_warnings(
             "평균 explained_variance가 음수여서 Critic이 아직 유용한 value 예측을 하지 못합니다."
         )
 
+    completed_games = rollout_diagnostics.get("completed_games", [])
+    if completed_games and mean(completed_games) < 8:
+        warnings.append(
+            "rollout당 완결 대국이 평균 8판보다 적어 Critic target의 표본 변동이 클 수 있습니다."
+        )
+    reward_signal_rate = rollout_diagnostics.get("reward_signal_rate", [])
+    if reward_signal_rate and mean(reward_signal_rate) < 0.01:
+        warnings.append(
+            "reward가 0이 아닌 transition이 평균 1%보다 적어 학습 신호가 매우 희소합니다."
+        )
+
     illegal_actions = sum(
         1
         for game in data.games
@@ -357,7 +419,14 @@ def build_warnings(
 
 
 def plot_learning_curves(data: ExperimentData, output_path: str | Path) -> Path:
-    figure, axes = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True)
+    has_rollout_metrics = any(row.phase == "rollout" for row in data.metrics)
+    plot_rows = 3 if has_rollout_metrics else 2
+    figure, axes = plt.subplots(
+        plot_rows,
+        2,
+        figsize=(12, 4 * plot_rows),
+        constrained_layout=True,
+    )
     figure.suptitle(f"PPO Learning Curves - {data.directory.name}", fontsize=14)
 
     periodic = [
@@ -429,6 +498,67 @@ def plot_learning_curves(data: ExperimentData, output_path: str | Path) -> Path:
     entropy_axis.set_xlabel("Timestep")
     entropy_axis.set_ylabel("Entropy")
     entropy_axis.grid(alpha=0.25)
+
+    if has_rollout_metrics:
+        rollout_game_axis = axes[2, 0]
+        plot_metric(
+            rollout_game_axis,
+            data.metrics,
+            "completed_games",
+            label="Completed games",
+            phase="rollout",
+        )
+        plot_metric(
+            rollout_game_axis,
+            data.metrics,
+            "decisive_games",
+            label="Decisive games",
+            phase="rollout",
+        )
+        reward_rate_axis = rollout_game_axis.twinx()
+        plot_metric(
+            reward_rate_axis,
+            data.metrics,
+            "reward_signal_rate",
+            label="Reward signal rate",
+            color="#d62728",
+            phase="rollout",
+        )
+        rollout_game_axis.set_title("Rollout game and reward signals")
+        rollout_game_axis.set_xlabel("Timestep")
+        rollout_game_axis.set_ylabel("Games per rollout")
+        reward_rate_axis.set_ylabel("Non-zero reward fraction")
+        rollout_game_axis.grid(alpha=0.25)
+        combine_legends(rollout_game_axis, reward_rate_axis)
+
+        rollout_spread_axis = axes[2, 1]
+        plot_metric(
+            rollout_spread_axis,
+            data.metrics,
+            "return_std",
+            label="Return std",
+            phase="rollout",
+        )
+        plot_metric(
+            rollout_spread_axis,
+            data.metrics,
+            "value_prediction_std",
+            label="Value prediction std",
+            phase="rollout",
+        )
+        plot_metric(
+            rollout_spread_axis,
+            data.metrics,
+            "advantage_std",
+            label="Advantage std",
+            phase="rollout",
+        )
+        rollout_spread_axis.set_title("Critic target spread")
+        rollout_spread_axis.set_xlabel("Timestep")
+        rollout_spread_axis.grid(alpha=0.25)
+        rollout_handles, _ = rollout_spread_axis.get_legend_handles_labels()
+        if rollout_handles:
+            rollout_spread_axis.legend()
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -564,11 +694,12 @@ def plot_metric(
     *,
     label: str,
     color: str | None = None,
+    phase: str = "train_update",
 ) -> None:
     rows = [
         row
         for row in metrics
-        if row.phase == "train_update" and row.metric == metric
+        if row.phase == phase and row.metric == metric
     ]
     if not rows:
         return
