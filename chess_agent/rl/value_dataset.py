@@ -40,6 +40,42 @@ class PackedValueDataset:
         )
 
 
+@dataclass(frozen=True)
+class ValueDatasetSummary:
+    positions: int
+    games: int
+    wins: int
+    draws: int
+    losses: int
+    target_mean: float
+    target_std: float
+    metadata: dict[str, Any]
+
+
+def summarize_value_dataset(dataset: PackedValueDataset) -> ValueDatasetSummary:
+    if len(dataset):
+        _, first_indices = np.unique(dataset.game_ids, return_index=True)
+        game_outcomes = dataset.outcomes[first_indices]
+        wins = int(np.count_nonzero(game_outcomes == 1))
+        draws = int(np.count_nonzero(game_outcomes == 0))
+        losses = int(np.count_nonzero(game_outcomes == -1))
+        target_mean = float(np.mean(dataset.targets))
+        target_std = float(np.std(dataset.targets))
+    else:
+        wins = draws = losses = 0
+        target_mean = target_std = 0.0
+    return ValueDatasetSummary(
+        positions=len(dataset),
+        games=dataset.games,
+        wins=wins,
+        draws=draws,
+        losses=losses,
+        target_mean=target_mean,
+        target_std=target_std,
+        metadata=dict(dataset.metadata),
+    )
+
+
 def pack_observations(observations: np.ndarray) -> np.ndarray:
     array = np.asarray(observations)
     if array.ndim != 4 or array.shape[-2:] != (8, 8):

@@ -14,7 +14,12 @@ from chess_agent.rl.policy_value import (
     load_policy_value,
     save_policy_value,
 )
-from chess_agent.rl.value_dataset import PackedValueDataset, load_value_dataset
+from chess_agent.rl.value_dataset import (
+    PackedValueDataset,
+    ValueDatasetSummary,
+    load_value_dataset,
+    summarize_value_dataset,
+)
 
 
 @dataclass(frozen=True)
@@ -59,6 +64,8 @@ class ValuePretrainingResult:
     final_model_path: Path
     best_model_path: Path
     experiment_run_dir: Path | None
+    train_dataset: ValueDatasetSummary
+    validation_dataset: ValueDatasetSummary
 
 
 def pretrain_value_head(
@@ -74,6 +81,14 @@ def pretrain_value_head(
     train_data = load_value_dataset(config.train_data_path)
     validation_data = load_value_dataset(config.validation_data_path)
     validate_dataset_pair(train_data, validation_data)
+    train_dataset_summary = summarize_value_dataset(train_data)
+    validation_dataset_summary = summarize_value_dataset(validation_data)
+    print_dataset_summary("Train", train_dataset_summary)
+    print_dataset_summary("Validation", validation_dataset_summary)
+    warn_about_outcome_balancing(
+        train_dataset_summary,
+        enabled=config.balance_outcomes,
+    )
     model = load_policy_value(config.model_path, device=resolved_device)
     if tuple(train_data.observation_shape) != (model.input_channels, 8, 8):
         raise ValueError("value dataset observation shape does not match the model")
@@ -207,6 +222,8 @@ def pretrain_value_head(
         experiment_run_dir=(
             experiment_logger.run_dir if experiment_logger is not None else None
         ),
+        train_dataset=train_dataset_summary,
+        validation_dataset=validation_dataset_summary,
     )
     if experiment_logger is not None:
         experiment_logger.log_checkpoint(
@@ -326,6 +343,43 @@ def make_sample_weights(
     if mean_weight > 0:
         weights /= mean_weight
     return weights
+
+
+def print_dataset_summary(label: str, summary: ValueDatasetSummary) -> None:
+    print(
+        f"{label} dataset: positions={summary.positions} games={summary.games} "
+        f"W/D/L={summary.wins}/{summary.draws}/{summary.losses} "
+        f"target_mean={summary.target_mean:.4f} "
+        f"target_std={summary.target_std:.4f}",
+        flush=True,
+    )
+
+
+def warn_about_outcome_balancing(
+    summary: ValueDatasetSummary,
+    *,
+    enabled: bool,
+) -> None:
+    if not enabled:
+        return
+    outcome_counts = [
+        count
+        for count in (summary.wins, summary.draws, summary.losses)
+        if count > 0
+    ]
+    if len(outcome_counts) < 2:
+        print(
+            "Warning: outcome balancing is enabled but the train dataset has "
+            "fewer than two observed outcome classes.",
+            flush=True,
+        )
+        return
+    if min(outcome_counts) < 0.05 * max(outcome_counts):
+        print(
+            "Warning: outcome balancing will strongly upweight a rare result "
+            "class; consider --no-balance-outcomes for on-policy value data.",
+            flush=True,
+        )
 
 
 def log_epoch_metrics(

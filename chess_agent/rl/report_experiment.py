@@ -128,6 +128,7 @@ def generate_experiment_reports(
     *,
     output_dir: str | Path | None = None,
     create_plots: bool = True,
+    force: bool = False,
 ) -> tuple[GeneratedExperimentReport, ...]:
     experiment_dirs = resolve_experiment_dirs(experiment_path)
     shared_output_dir = Path(output_dir) if output_dir is not None else None
@@ -138,6 +139,12 @@ def generate_experiment_reports(
         report_output_dir = shared_output_dir
         if use_named_output_dirs:
             report_output_dir = shared_output_dir / experiment_dir.name
+        if not force and experiment_report_is_complete(
+            experiment_dir,
+            output_dir=report_output_dir,
+            create_plots=create_plots,
+        ):
+            continue
         reports.append(
             generate_experiment_report(
                 experiment_dir,
@@ -146,6 +153,25 @@ def generate_experiment_reports(
             )
         )
     return tuple(reports)
+
+
+def experiment_report_is_complete(
+    experiment_path: str | Path,
+    *,
+    output_dir: str | Path | None = None,
+    create_plots: bool = True,
+) -> bool:
+    experiment_dir = resolve_experiment_dir(experiment_path)
+    resolved_output_dir = (
+        Path(output_dir) if output_dir is not None else experiment_dir / "report"
+    )
+    expected_paths = [resolved_output_dir / "summary.txt"]
+    if create_plots:
+        expected_paths.append(resolved_output_dir / "learning_curves.png")
+        data = load_experiment(experiment_dir)
+        if not is_value_pretraining_experiment(data):
+            expected_paths.append(resolved_output_dir / "game_outcomes.png")
+    return all(path.is_file() and path.stat().st_size > 0 for path in expected_paths)
 
 
 def resolve_experiment_dirs(path: str | Path) -> tuple[Path, ...]:
@@ -388,6 +414,15 @@ def is_value_pretraining_experiment(data: ExperimentData) -> bool:
 
 def build_value_pretraining_text_report(data: ExperimentData) -> str:
     config = data.config
+    result_summary = data.summary_document.get("summary", {})
+    if not isinstance(result_summary, dict):
+        result_summary = {}
+    train_dataset = result_summary.get("train_dataset", {})
+    validation_dataset = result_summary.get("validation_dataset", {})
+    if not isinstance(train_dataset, dict):
+        train_dataset = {}
+    if not isinstance(validation_dataset, dict):
+        validation_dataset = {}
     experiment_name = str(
         data.config_document.get("experiment_name", data.directory.name)
     )
@@ -424,10 +459,20 @@ def build_value_pretraining_text_report(data: ExperimentData) -> str:
         f"대국 균형:       {config.get('balance_games', 'unknown')}",
         f"승무패 균형:     {config.get('balance_outcomes', 'unknown')}",
         f"소요 시간:       {experiment_duration(data)}",
-        "",
-        "학습 지표",
-        "---------",
     ]
+    if train_dataset or validation_dataset:
+        lines.extend(["", "데이터셋", "--------"])
+        append_value_dataset_summary(lines, "train", train_dataset)
+        append_value_dataset_summary(lines, "validation", validation_dataset)
+        metadata = train_dataset.get("metadata", {})
+        if isinstance(metadata, dict):
+            lines.append(
+                "수집 조건:       "
+                f"opponent={metadata.get('opponent', 'unknown')}, "
+                f"max_plies={metadata.get('max_plies', 'unknown')}, "
+                f"gamma={metadata.get('gamma', 'unknown')}"
+            )
+    lines.extend(["", "학습 지표", "---------"])
     for name in metric_names:
         values = diagnostics[name]
         if not values:
@@ -465,6 +510,13 @@ def build_value_pretraining_text_report(data: ExperimentData) -> str:
         and prediction_std[-1] >= 0.25 * target_std[-1]
     ):
         lines.append("- value 예측이 target 차이를 양의 explained variance로 설명하기 시작했습니다.")
+    if config.get("balance_outcomes") and value_dataset_is_highly_imbalanced(
+        train_dataset
+    ):
+        lines.append(
+            "- 승무패 균형이 켜진 상태에서 희소한 결과가 5% 미만이라 해당 대국이 "
+            "과도하게 가중될 수 있습니다."
+        )
     lines.extend(
         [
             "",
@@ -478,6 +530,34 @@ def build_value_pretraining_text_report(data: ExperimentData) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def append_value_dataset_summary(
+    lines: list[str],
+    label: str,
+    summary: dict[str, Any],
+) -> None:
+    if not summary:
+        return
+    lines.append(
+        f"{label:10s} positions={format_int(summary.get('positions')):>9s} "
+        f"games={format_int(summary.get('games')):>6s} "
+        f"W/D/L={format_int(summary.get('wins'))}/"
+        f"{format_int(summary.get('draws'))}/"
+        f"{format_int(summary.get('losses'))}"
+    )
+
+
+def value_dataset_is_highly_imbalanced(summary: dict[str, Any]) -> bool:
+    counts = []
+    for key in ("wins", "draws", "losses"):
+        try:
+            count = int(summary.get(key, 0))
+        except (TypeError, ValueError):
+            continue
+        if count > 0:
+            counts.append(count)
+    return len(counts) >= 2 and min(counts) < 0.05 * max(counts)
 
 
 def build_warnings(
@@ -1084,12 +1164,25 @@ def main() -> None:
     )
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--no-plots", action="store_true")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="regenerate reports even when all expected report files already exist",
+    )
     args = parser.parse_args()
 
+    experiment_dirs = resolve_experiment_dirs(args.experiment_path)
     results = generate_experiment_reports(
         args.experiment_path,
         output_dir=args.output_dir,
         create_plots=not args.no_plots,
+        force=args.force,
+    )
+    generated_dirs = {result.experiment_dir for result in results}
+    skipped_dirs = tuple(
+        experiment_dir
+        for experiment_dir in experiment_dirs
+        if experiment_dir not in generated_dirs
     )
     for index, result in enumerate(results):
         if index:
@@ -1100,8 +1193,13 @@ def main() -> None:
             print(f"Learning curves: {result.learning_curves_path}")
         if result.game_outcomes_path is not None:
             print(f"Game outcomes:   {result.game_outcomes_path}")
-    if len(results) > 1:
-        print(f"\nGenerated reports: {len(results)}")
+    if results and skipped_dirs:
+        print()
+    for experiment_dir in skipped_dirs:
+        print(f"Skipped existing: {experiment_dir}")
+    if len(experiment_dirs) > 1 or skipped_dirs:
+        print(f"\nGenerated reports:        {len(results)}")
+        print(f"Skipped existing reports: {len(skipped_dirs)}")
 
 
 if __name__ == "__main__":

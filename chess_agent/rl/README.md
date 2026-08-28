@@ -35,6 +35,7 @@ Gymnasium 환경
 - `value_dataset.py`: full-chess value dataset의 bit-pack NPZ 저장/불러오기
 - `collect_value_dataset.py`: mixed 상대 대국에서 value train/validation 상태 수집
 - `pretrain_value_head.py`: policy를 고정한 value head supervised 사전학습
+- `evaluate_value_head.py`: checkpoint를 지정한 value dataset에서 독립 평가
 - `experiment_tracking.py`: 설정, 학습 지표, 대국 결과와 checkpoint 이벤트 기록
 - `ppo_policy.py`: 기존 CNN 구조를 사용하는 Stable-Baselines3 maskable policy
 - `train_full_chess_ppo.py`: FullChess Maskable PPO 학습, 평가, checkpoint 기록
@@ -206,6 +207,92 @@ python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo
 python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_rollout1024_final_500_games.csv analysis/ppo_valuepretrain_final_500_games.csv --output-path analysis/ppo_rollout1024_vs_valuepretrain_final.txt
 ```
 
+### PPO 조건 일치 Value 재실험
+
+Value는 상대 정책까지 포함한 기대 reward이므로 random 상대와 alpha 상대에서 서로 다른
+함수가 됩니다. PPO가 `random`, `max_plies=100`으로 학습될 때는 value 데이터도 같은
+조건으로 만드는 것이 우선입니다. Random 상대에서는 패배가 매우 희소할 수 있으므로
+`--no-balance-outcomes`를 사용해 극소수 패배 대국이 과도하게 확대되지 않게 합니다.
+
+#### 1. Random-100 데이터 수집
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.collect_value_dataset --model-path tmp\full_chess_policy_value.pt --train-output data\value\full_chess_value_random100_train.npz --validation-output data\value\full_chess_value_random100_valid.npz --games 5000 --validation-fraction 0.1 --opponent random --max-plies 100 --gamma 0.995 --seed 0 --device cuda --log-every 100
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.collect_value_dataset --model-path tmp/full_chess_policy_value.pt --train-output data/value/full_chess_value_random100_train.npz --validation-output data/value/full_chess_value_random100_valid.npz --games 5000 --validation-fraction 0.1 --opponent random --max-plies 100 --gamma 0.995 --seed 0 --device cuda --log-every 100
+```
+
+#### 2. Random-100 Value head 사전학습
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.pretrain_value_head --model-path tmp\full_chess_policy_value.pt --train-data data\value\full_chess_value_random100_train.npz --validation-data data\value\full_chess_value_random100_valid.npz --epochs 50 --batch-size 1024 --learning-rate 0.001 --weight-decay 0.00001 --patience 10 --no-balance-outcomes --seed 0 --device cuda --save-path tmp\full_chess_policy_value_random100_final.pt --best-model-path tmp\full_chess_policy_value_random100_best.pt --experiment-dir analysis\experiments --experiment-name value_head_pretrain_random100
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.pretrain_value_head --model-path tmp/full_chess_policy_value.pt --train-data data/value/full_chess_value_random100_train.npz --validation-data data/value/full_chess_value_random100_valid.npz --epochs 50 --batch-size 1024 --learning-rate 0.001 --weight-decay 0.00001 --patience 10 --no-balance-outcomes --seed 0 --device cuda --save-path tmp/full_chess_policy_value_random100_final.pt --best-model-path tmp/full_chess_policy_value_random100_best.pt --experiment-dir analysis/experiments --experiment-name value_head_pretrain_random100
+```
+
+#### 3. 같은 Random-100 validation에서 Value 직접 비교
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_value_head --model-path tmp\full_chess_policy_value_value_best.pt --data data\value\full_chess_value_random100_valid.npz --device cuda --output-path analysis\value_mixed200_on_random100.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_value_head --model-path tmp\full_chess_policy_value_random100_best.pt --data data\value\full_chess_value_random100_valid.npz --device cuda --output-path analysis\value_random100_on_random100.txt
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.evaluate_value_head --model-path tmp/full_chess_policy_value_value_best.pt --data data/value/full_chess_value_random100_valid.npz --device cuda --output-path analysis/value_mixed200_on_random100.txt
+python -m chess_agent.rl.evaluate_value_head --model-path tmp/full_chess_policy_value_random100_best.pt --data data/value/full_chess_value_random100_valid.npz --device cuda --output-path analysis/value_random100_on_random100.txt
+```
+
+두 TXT에서 Huber loss와 MAE는 낮을수록, explained variance는 높을수록 좋습니다. 이
+비교는 PPO update가 개입하기 전이라 데이터 조건 일치의 효과만 보여줍니다.
+
+#### 4. Random-100 Value로 PPO 학습
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp\full_chess_policy_value_random100_best.pt --total-timesteps 16384 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 8192 --evaluation-games 200 --checkpoint-every 8192 --seed 0 --device cuda --initial-model-path tmp\full_chess_ppo_value_random100_initial.zip --save-path tmp\full_chess_ppo_value_random100_final.zip --best-model-path tmp\full_chess_ppo_value_random100_best.zip --checkpoint-dir tmp\full_chess_ppo_value_random100_checkpoints --experiment-name ppo_value_random100_rollout1024
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full_chess_policy_value_random100_best.pt --total-timesteps 16384 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 8192 --evaluation-games 200 --checkpoint-every 8192 --seed 0 --device cuda --initial-model-path tmp/full_chess_ppo_value_random100_initial.zip --save-path tmp/full_chess_ppo_value_random100_final.zip --best-model-path tmp/full_chess_ppo_value_random100_best.zip --checkpoint-dir tmp/full_chess_ppo_value_random100_checkpoints --experiment-name ppo_value_random100_rollout1024
+```
+
+#### 5. 기존 PPO와 500판 paired 비교
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_rollout1024_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis\ppo_rollout1024_final_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_value_random100_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis\ppo_value_random100_final_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.compare_full_chess_evaluations analysis\ppo_rollout1024_final_500_games.csv analysis\ppo_value_random100_final_500_games.csv --output-path analysis\ppo_rollout1024_vs_value_random100_final.txt
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_rollout1024_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis/ppo_rollout1024_final_500.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_value_random100_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis/ppo_value_random100_final_500.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_rollout1024_final_500_games.csv analysis/ppo_value_random100_final_500_games.csv --output-path analysis/ppo_rollout1024_vs_value_random100_final.txt
+```
+
 ## 실험 과정 기록
 
 학습 명령에 `--experiment-dir`을 지정하면 실행마다 timestamp가 붙은 별도 폴더를
@@ -242,6 +329,10 @@ Excel 또는 발표용 그래프 코드에서 `step`, `metric`, `value` 열을 �
 상위 `analysis/experiments` 폴더를 지정하면 바로 아래의 모든 실험 폴더에 대해 보고서를
 생성합니다.
 
+기본적으로 필요한 `summary.txt`와 그래프가 이미 모두 있는 실험은 건너뜁니다. 일부
+보고서 파일이 빠진 실험만 새로 생성하며, 기존 보고서까지 모두 갱신하려면 `--force`를
+사용합니다.
+
 Windows PowerShell:
 
 ```powershell
@@ -252,6 +343,20 @@ Linux:
 
 ```bash
 python -m chess_agent.rl.report_experiment analysis/experiments
+```
+
+기존 보고서를 포함해 모두 다시 생성하는 명령은 다음과 같습니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.report_experiment analysis\experiments --force
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.report_experiment analysis/experiments --force
 ```
 
 특정 실험만 보고 싶으면 마지막 인자를 해당 실험 폴더로 바꿉니다. 생성 파일은 다음과

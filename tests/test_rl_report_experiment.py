@@ -110,6 +110,13 @@ def test_generate_experiment_report_from_one_experiment(
     assert "rollout당 완결 대국이 평균 8판보다 적어" in report
     assert "reward가 0이 아닌 transition이 평균 1%보다 적어" in report
 
+    assert generate_experiment_reports(logger.run_dir) == ()
+    result.game_outcomes_path.unlink()
+    regenerated = generate_experiment_reports(logger.run_dir)
+    assert len(regenerated) == 1
+    assert regenerated[0].game_outcomes_path is not None
+    assert regenerated[0].game_outcomes_path.is_file()
+
 
 def test_generate_experiment_reports_for_every_child_experiment(
     tmp_path: Path,
@@ -155,3 +162,36 @@ def test_generate_experiment_reports_for_every_child_experiment(
         output_dir / "run_first_first",
         output_dir / "run_second_second",
     ]
+
+
+def test_generate_experiment_reports_skips_complete_reports_unless_forced(
+    tmp_path: Path,
+) -> None:
+    logger = ExperimentLogger.create(
+        tmp_path,
+        experiment_name="skip existing",
+        run_id="test_run",
+        config={"total_timesteps": 1, "opponent": "random"},
+    )
+    logger.log_metrics(
+        step=1,
+        phase="train_update",
+        metrics={"value_loss": 0.1},
+    )
+
+    first_results = generate_experiment_reports(tmp_path, create_plots=False)
+    assert len(first_results) == 1
+    summary_path = first_results[0].summary_path
+    summary_path.write_text("keep this report", encoding="utf-8")
+
+    skipped_results = generate_experiment_reports(tmp_path, create_plots=False)
+    assert skipped_results == ()
+    assert summary_path.read_text(encoding="utf-8") == "keep this report"
+
+    forced_results = generate_experiment_reports(
+        tmp_path,
+        create_plots=False,
+        force=True,
+    )
+    assert len(forced_results) == 1
+    assert summary_path.read_text(encoding="utf-8") != "keep this report"

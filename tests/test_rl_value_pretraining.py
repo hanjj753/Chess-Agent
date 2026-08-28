@@ -4,6 +4,10 @@ import numpy as np
 import torch
 
 from chess_agent.rl.collect_value_dataset import collect_value_dataset
+from chess_agent.rl.evaluate_value_head import (
+    build_value_evaluation_report,
+    evaluate_value_checkpoint,
+)
 from chess_agent.rl.policy_value import (
     PolicyValueNetwork,
     load_policy_value,
@@ -19,6 +23,7 @@ from chess_agent.rl.value_dataset import (
     load_value_dataset,
     pack_observations,
     save_value_dataset,
+    summarize_value_dataset,
 )
 
 
@@ -43,6 +48,9 @@ def test_value_dataset_pack_save_and_load_round_trip(tmp_path: Path) -> None:
     assert dataset.games == 3
     assert dataset.metadata["split"] == "train"
     np.testing.assert_array_equal(dataset.unpack(np.arange(4)), observations)
+    summary = summarize_value_dataset(dataset)
+    assert (summary.wins, summary.draws, summary.losses) == (1, 1, 1)
+    assert summary.positions == 4
 
 
 def test_collect_value_dataset_splits_whole_games(tmp_path: Path) -> None:
@@ -137,9 +145,14 @@ def test_value_pretraining_changes_only_value_head(tmp_path: Path) -> None:
     assert result.best_model_path.is_file()
     assert result.experiment_run_dir is not None
     assert (result.experiment_run_dir / "metrics.csv").is_file()
+    assert result.train_dataset.games == 6
+    assert result.validation_dataset.games == 3
 
     report = generate_experiment_report(result.experiment_run_dir)
     assert "Value-head supervised pretraining 보고서" in report.summary_path.read_text(
+        encoding="utf-8"
+    )
+    assert "opponent=random, max_plies=100" in report.summary_path.read_text(
         encoding="utf-8"
     )
     assert report.learning_curves_path is not None
@@ -173,6 +186,39 @@ def test_value_sample_weights_balance_games_and_outcomes(tmp_path: Path) -> None
     np.testing.assert_allclose(class_weights, class_weights[0])
 
 
+def test_evaluate_value_checkpoint_writes_dataset_metrics(tmp_path: Path) -> None:
+    model_path = tmp_path / "model.pt"
+    data_path = tmp_path / "validation.npz"
+    save_policy_value(
+        PolicyValueNetwork(
+            input_channels=18,
+            hidden_size=8,
+            dropout=0.0,
+            residual_blocks=1,
+        ),
+        model_path,
+    )
+    make_synthetic_dataset(data_path, game_offset=0, games=3)
+
+    metrics, dataset = evaluate_value_checkpoint(
+        model_path=model_path,
+        data_path=data_path,
+        batch_size=4,
+        device="cpu",
+    )
+    report = build_value_evaluation_report(
+        model_path=model_path,
+        data_path=data_path,
+        metrics=metrics,
+        dataset=dataset,
+    )
+
+    assert dataset.games == 3
+    assert "Opponent:       random" in report
+    assert "Max plies:      100" in report
+    assert "Explained var:" in report
+
+
 def make_synthetic_dataset(path: Path, *, game_offset: int, games: int) -> None:
     observations = np.zeros((games * 2, 18, 8, 8), dtype=np.int8)
     game_ids = np.repeat(np.arange(game_offset + 1, game_offset + games + 1), 2)
@@ -187,4 +233,9 @@ def make_synthetic_dataset(path: Path, *, game_offset: int, games: int) -> None:
         outcomes=sample_outcomes,
         game_ids=game_ids.astype(np.int32),
         observation_shape=(18, 8, 8),
+        metadata={
+            "opponent": "random",
+            "max_plies": 100,
+            "gamma": 0.995,
+        },
     )
