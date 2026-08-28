@@ -32,6 +32,9 @@ Gymnasium 환경
 - `full_chess_env.py`: 최근 보드 history와 고정 상대를 사용하는 일반 대국 환경
 - `policy_value.py`: 공유 CNN 위에 policy head와 value head를 둔 모델
 - `initialize_policy_value.py`: tactical CNN checkpoint를 Policy-Value 모델로 변환
+- `value_dataset.py`: full-chess value dataset의 bit-pack NPZ 저장/불러오기
+- `collect_value_dataset.py`: mixed 상대 대국에서 value train/validation 상태 수집
+- `pretrain_value_head.py`: policy를 고정한 value head supervised 사전학습
 - `experiment_tracking.py`: 설정, 학습 지표, 대국 결과와 checkpoint 이벤트 기록
 - `ppo_policy.py`: 기존 CNN 구조를 사용하는 Stable-Baselines3 maskable policy
 - `train_full_chess_ppo.py`: FullChess Maskable PPO 학습, 평가, checkpoint 기록
@@ -113,6 +116,96 @@ Linux:
 python -m chess_agent.rl.initialize_policy_value --policy-path tmp/tactical_supervised_cnn_best.pt --output-path tmp/full_chess_policy_value.pt --history-length 4
 ```
 
+### Value Head Supervised 사전학습
+
+초기 Policy-Value checkpoint의 value head는 정답으로 학습되지 않은 상태입니다. PPO의
+희소한 승패 reward만으로 처음부터 배우기 전에, 완결 대국의 각 agent-turn 상태에 최종
+결과를 label로 붙여 value head를 먼저 학습합니다. 마지막 상태는 승/무/패를 `+1/0/-1`로
+사용하고, 앞선 상태는 PPO와 같은 `gamma=0.995`만큼 할인합니다.
+
+데이터는 같은 대국의 상태가 train과 validation에 나뉘지 않도록 대국 단위로 분리합니다.
+observation은 0/1 bit-pack NPZ로 저장해 일반 float tensor보다 디스크 사용량을 줄입니다.
+random 상대는 승리 쪽, alpha 상대는 패배 쪽으로 치우칠 수 있어 기본 수집은 둘을 절반씩
+섞습니다. Policy는 확률적으로 수를 골라 더 다양한 상태를 만듭니다.
+
+#### 1. Value dataset 수집
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.collect_value_dataset --model-path tmp\full_chess_policy_value.pt --train-output data\value\full_chess_value_train.npz --validation-output data\value\full_chess_value_valid.npz --games 5000 --validation-fraction 0.1 --opponent mixed --alpha-fraction 0.5 --opponent-depth 1 --max-plies 200 --gamma 0.995 --seed 0 --device cuda --log-every 100
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.collect_value_dataset --model-path tmp/full_chess_policy_value.pt --train-output data/value/full_chess_value_train.npz --validation-output data/value/full_chess_value_valid.npz --games 5000 --validation-fraction 0.1 --opponent mixed --alpha-fraction 0.5 --opponent-depth 1 --max-plies 200 --gamma 0.995 --seed 0 --device cuda --log-every 100
+```
+
+처음 파이프라인만 확인할 때는 `--games 500`과 별도 `_smoke.npz` 출력 이름을 사용합니다.
+최종 W/D/L에서 한 결과가 지나치게 적으면 `--alpha-fraction`이나 `--opponent-depth`를
+조절해 양수, 0, 음수 label을 모두 확보합니다.
+
+#### 2. Value head 학습
+
+입력 CNN과 policy head는 eval mode로 고정하며 weight와 BatchNorm 통계를 바꾸지 않습니다.
+value head만 Huber loss로 학습합니다. 긴 대국이 과도한 비중을 갖지 않도록 대국별
+가중치를 맞추고, 승/무/패 대국 수도 기본적으로 균형화합니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.pretrain_value_head --model-path tmp\full_chess_policy_value.pt --train-data data\value\full_chess_value_train.npz --validation-data data\value\full_chess_value_valid.npz --epochs 50 --batch-size 1024 --learning-rate 0.001 --weight-decay 0.00001 --patience 10 --seed 0 --device cuda --save-path tmp\full_chess_policy_value_value_final.pt --best-model-path tmp\full_chess_policy_value_value_best.pt --experiment-dir analysis\experiments --experiment-name value_head_pretrain
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.pretrain_value_head --model-path tmp/full_chess_policy_value.pt --train-data data/value/full_chess_value_train.npz --validation-data data/value/full_chess_value_valid.npz --epochs 50 --batch-size 1024 --learning-rate 0.001 --weight-decay 0.00001 --patience 10 --seed 0 --device cuda --save-path tmp/full_chess_policy_value_value_final.pt --best-model-path tmp/full_chess_policy_value_value_best.pt --experiment-dir analysis/experiments --experiment-name value_head_pretrain
+```
+
+우선 볼 값은 `validation_loss`, `validation_explained_variance`, `prediction_std`입니다.
+explained variance가 0보다 높아지고 prediction std가 target std 방향으로 증가해야 value가
+상태 차이를 배우고 있다고 볼 수 있습니다. `report_experiment`는 이 실험을 자동으로
+구분해 value 전용 `summary.txt`와 `learning_curves.png`를 생성합니다.
+
+#### 3. 사전학습 Value로 PPO 비교
+
+value best checkpoint를 사용하되 나머지는 앞선 rollout 1024 실험과 동일하게 둡니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp\full_chess_policy_value_value_best.pt --total-timesteps 16384 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 8192 --evaluation-games 200 --checkpoint-every 8192 --seed 0 --device cuda --initial-model-path tmp\full_chess_ppo_valuepretrain_initial.zip --save-path tmp\full_chess_ppo_valuepretrain_final.zip --best-model-path tmp\full_chess_ppo_valuepretrain_best.zip --checkpoint-dir tmp\full_chess_ppo_valuepretrain_checkpoints --experiment-name ppo_valuepretrain_rollout1024
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full_chess_policy_value_value_best.pt --total-timesteps 16384 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 8192 --evaluation-games 200 --checkpoint-every 8192 --seed 0 --device cuda --initial-model-path tmp/full_chess_ppo_valuepretrain_initial.zip --save-path tmp/full_chess_ppo_valuepretrain_final.zip --best-model-path tmp/full_chess_ppo_valuepretrain_best.zip --checkpoint-dir tmp/full_chess_ppo_valuepretrain_checkpoints --experiment-name ppo_valuepretrain_rollout1024
+```
+
+이 실험에서는 기존 `ppo_rollout1024`와 비교해 step 0의 explained variance, 초반 value loss,
+주기 evaluation 점수, best checkpoint가 step 0을 넘어서는지를 확인합니다.
+
+#### 4. 기존 PPO와 500판 paired 비교
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_rollout1024_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis\ppo_rollout1024_final_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_valuepretrain_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis\ppo_valuepretrain_final_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.compare_full_chess_evaluations analysis\ppo_rollout1024_final_500_games.csv analysis\ppo_valuepretrain_final_500_games.csv --output-path analysis\ppo_rollout1024_vs_valuepretrain_final.txt
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_rollout1024_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis/ppo_rollout1024_final_500.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_valuepretrain_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis/ppo_valuepretrain_final_500.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_rollout1024_final_500_games.csv analysis/ppo_valuepretrain_final_500_games.csv --output-path analysis/ppo_rollout1024_vs_valuepretrain_final.txt
+```
+
 ## 실험 과정 기록
 
 학습 명령에 `--experiment-dir`을 지정하면 실행마다 timestamp가 붙은 별도 폴더를
@@ -146,8 +239,8 @@ Excel 또는 발표용 그래프 코드에서 `step`, `metric`, `value` 열을 �
 ### 자동 실험 보고서
 
 실험 폴더 하나를 지정하면 `report/` 아래에 한국어 요약과 발표에 쓸 그래프를 만듭니다.
-상위 `analysis/experiments` 폴더를 지정하면 수정 시각이 가장 최근인 실험을 자동으로
-선택합니다.
+상위 `analysis/experiments` 폴더를 지정하면 바로 아래의 모든 실험 폴더에 대해 보고서를
+생성합니다.
 
 Windows PowerShell:
 
@@ -165,7 +258,7 @@ python -m chess_agent.rl.report_experiment analysis/experiments
 같습니다.
 
 - `summary.txt`: 설정, W/D/L, 평가 추이, PPO 진단과 자동 경고
-- `learning_curves.png`: 평가 점수율, KL/clipping, Critic, entropy 곡선
+- `learning_curves.png`: 평가 점수율, KL/clipping, Critic, entropy, rollout 진단 곡선
 - `game_outcomes.png`: 평가 W/D/L과 학습 대국 종료 원인
 
 그래프가 필요 없으면 `--no-plots`, 다른 위치에 저장하려면 `--output-dir`을 사용합니다.
@@ -261,8 +354,8 @@ python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full
 python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full_chess_policy_value.pt --total-timesteps 16384 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 8192 --evaluation-games 200 --checkpoint-every 8192 --seed 0 --device cuda --initial-model-path tmp/full_chess_ppo_rollout1024_initial.zip --save-path tmp/full_chess_ppo_rollout1024_final.zip --best-model-path tmp/full_chess_ppo_rollout1024_best.zip --checkpoint-dir tmp/full_chess_ppo_rollout1024_checkpoints --experiment-name ppo_rollout1024
 ```
 
-각 학습 직후 다음 명령을 실행하면 가장 최근 실험의 `report/summary.txt`와 그래프가
-생성됩니다.
+각 학습 직후 다음 명령을 실행하면 `analysis/experiments` 바로 아래의 모든 실험에
+`report/summary.txt`와 그래프가 생성됩니다.
 
 Windows PowerShell:
 

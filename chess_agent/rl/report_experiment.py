@@ -89,12 +89,17 @@ def generate_experiment_report(
 ) -> GeneratedExperimentReport:
     experiment_dir = resolve_experiment_dir(experiment_path)
     data = load_experiment(experiment_dir)
+    value_pretraining = is_value_pretraining_experiment(data)
     resolved_output_dir = (
         Path(output_dir) if output_dir is not None else experiment_dir / "report"
     )
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
 
-    report_text = build_text_report(data)
+    report_text = (
+        build_value_pretraining_text_report(data)
+        if value_pretraining
+        else build_text_report(data)
+    )
     summary_path = resolved_output_dir / "summary.txt"
     summary_path.write_text(report_text, encoding="utf-8")
 
@@ -102,9 +107,12 @@ def generate_experiment_report(
     game_outcomes_path = None
     if create_plots:
         learning_curves_path = resolved_output_dir / "learning_curves.png"
-        game_outcomes_path = resolved_output_dir / "game_outcomes.png"
-        plot_learning_curves(data, learning_curves_path)
-        plot_game_outcomes(data, game_outcomes_path)
+        if value_pretraining:
+            plot_value_pretraining_curves(data, learning_curves_path)
+        else:
+            game_outcomes_path = resolved_output_dir / "game_outcomes.png"
+            plot_learning_curves(data, learning_curves_path)
+            plot_game_outcomes(data, game_outcomes_path)
 
     return GeneratedExperimentReport(
         experiment_dir=experiment_dir,
@@ -115,21 +123,61 @@ def generate_experiment_report(
     )
 
 
-def resolve_experiment_dir(path: str | Path) -> Path:
+def generate_experiment_reports(
+    experiment_path: str | Path,
+    *,
+    output_dir: str | Path | None = None,
+    create_plots: bool = True,
+) -> tuple[GeneratedExperimentReport, ...]:
+    experiment_dirs = resolve_experiment_dirs(experiment_path)
+    shared_output_dir = Path(output_dir) if output_dir is not None else None
+    use_named_output_dirs = shared_output_dir is not None and len(experiment_dirs) > 1
+
+    reports = []
+    for experiment_dir in experiment_dirs:
+        report_output_dir = shared_output_dir
+        if use_named_output_dirs:
+            report_output_dir = shared_output_dir / experiment_dir.name
+        reports.append(
+            generate_experiment_report(
+                experiment_dir,
+                output_dir=report_output_dir,
+                create_plots=create_plots,
+            )
+        )
+    return tuple(reports)
+
+
+def resolve_experiment_dirs(path: str | Path) -> tuple[Path, ...]:
     candidate = Path(path)
     if (candidate / "config.json").is_file():
-        return candidate
+        return (candidate,)
     if not candidate.is_dir():
         raise ValueError(f"experiment path is not a directory: {candidate}")
 
-    experiments = [
-        child
-        for child in candidate.iterdir()
-        if child.is_dir() and (child / "config.json").is_file()
-    ]
+    experiments = tuple(
+        sorted(
+            (
+                child
+                for child in candidate.iterdir()
+                if child.is_dir() and (child / "config.json").is_file()
+            ),
+            key=lambda child: child.name,
+        )
+    )
     if not experiments:
         raise ValueError(f"no experiment directories found under: {candidate}")
-    return max(experiments, key=lambda child: child.stat().st_mtime)
+    return experiments
+
+
+def resolve_experiment_dir(path: str | Path) -> Path:
+    experiment_dirs = resolve_experiment_dirs(path)
+    if len(experiment_dirs) != 1:
+        raise ValueError(
+            "expected one experiment directory; "
+            "use generate_experiment_reports() for a parent directory"
+        )
+    return experiment_dirs[0]
 
 
 def load_experiment(directory: str | Path) -> ExperimentData:
@@ -330,6 +378,108 @@ def build_text_report(data: ExperimentData) -> str:
     return "\n".join(lines)
 
 
+def is_value_pretraining_experiment(data: ExperimentData) -> bool:
+    return (
+        "train_data_path" in data.config
+        and "validation_data_path" in data.config
+        and any(row.phase == "value_pretrain" for row in data.metrics)
+    )
+
+
+def build_value_pretraining_text_report(data: ExperimentData) -> str:
+    config = data.config
+    experiment_name = str(
+        data.config_document.get("experiment_name", data.directory.name)
+    )
+    metric_names = (
+        "train_loss",
+        "validation_loss",
+        "validation_mae",
+        "validation_rmse",
+        "validation_explained_variance",
+        "validation_target_std",
+        "validation_prediction_std",
+    )
+    diagnostics = {
+        name: metric_values(data.metrics, phase="value_pretrain", metric=name)
+        for name in metric_names
+    }
+    completed_epoch = max(
+        (row.step for row in data.metrics if row.phase == "value_pretrain"),
+        default=0,
+    )
+    best_checkpoint = find_best_checkpoint(data.events)
+    lines = [
+        "Value-head supervised pretraining 보고서",
+        "=" * 39,
+        f"실험 이름:       {experiment_name}",
+        f"실험 폴더:       {data.directory}",
+        f"source model:    {config.get('model_path', 'unknown')}",
+        f"train data:      {config.get('train_data_path', 'unknown')}",
+        f"validation data: {config.get('validation_data_path', 'unknown')}",
+        f"완료 epoch:      {completed_epoch}",
+        f"목표 epoch:      {format_int(config.get('epochs'))}",
+        f"batch size:      {format_int(config.get('batch_size'))}",
+        f"learning rate:   {config.get('learning_rate', 'unknown')}",
+        f"대국 균형:       {config.get('balance_games', 'unknown')}",
+        f"승무패 균형:     {config.get('balance_outcomes', 'unknown')}",
+        f"소요 시간:       {experiment_duration(data)}",
+        "",
+        "학습 지표",
+        "---------",
+    ]
+    for name in metric_names:
+        values = diagnostics[name]
+        if not values:
+            continue
+        lines.append(
+            f"{name:32s} initial={values[0]:9.5f} "
+            f"min={min(values):9.5f} max={max(values):9.5f} "
+            f"last={values[-1]:9.5f}"
+        )
+    lines.extend(["", "Best checkpoint", "---------------"])
+    if best_checkpoint is None:
+        lines.append("기록된 best checkpoint가 없습니다.")
+    else:
+        lines.append(f"epoch:            {int(best_checkpoint.get('step', 0))}")
+        lines.append(f"path:             {best_checkpoint.get('path', '')}")
+        best_metrics = best_checkpoint.get("metrics", {})
+        if isinstance(best_metrics, dict) and "validation_loss" in best_metrics:
+            lines.append(
+                f"validation loss:  {float(best_metrics['validation_loss']):.5f}"
+            )
+
+    lines.extend(["", "해석과 주의사항", "----------------"])
+    explained_variance = diagnostics["validation_explained_variance"]
+    prediction_std = diagnostics["validation_prediction_std"]
+    target_std = diagnostics["validation_target_std"]
+    if explained_variance and explained_variance[-1] <= 0:
+        lines.append("- validation explained variance가 0 이하라 value가 아직 target을 설명하지 못합니다.")
+    if prediction_std and target_std and prediction_std[-1] < 0.25 * target_std[-1]:
+        lines.append("- value prediction 표준편차가 target의 25%보다 작아 예측이 지나치게 평평합니다.")
+    if (
+        explained_variance
+        and explained_variance[-1] > 0
+        and prediction_std
+        and target_std
+        and prediction_std[-1] >= 0.25 * target_std[-1]
+    ):
+        lines.append("- value 예측이 target 차이를 양의 explained variance로 설명하기 시작했습니다.")
+    lines.extend(
+        [
+            "",
+            "빠르게 볼 항목",
+            "--------------",
+            "1. validation loss와 MAE가 감소하는가?",
+            "2. explained variance가 0보다 높아지는가?",
+            "3. prediction std가 0에 머물지 않고 target std에 가까워지는가?",
+            "4. best epoch 이후 validation 성능이 악화되어 과적합하지 않는가?",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def build_warnings(
     data: ExperimentData,
     evaluation_groups: list[tuple[tuple[str, int], tuple[GameRow, ...]]],
@@ -416,6 +566,94 @@ def build_warnings(
     else:
         warnings.append("불법 수 종료가 0판이므로 action masking은 정상 동작했습니다.")
     return warnings
+
+
+def plot_value_pretraining_curves(
+    data: ExperimentData,
+    output_path: str | Path,
+) -> Path:
+    figure, axes = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True)
+    figure.suptitle(f"Value Pretraining - {data.directory.name}", fontsize=14)
+
+    loss_axis = axes[0, 0]
+    plot_metric(
+        loss_axis,
+        data.metrics,
+        "train_loss",
+        label="Train loss",
+        phase="value_pretrain",
+    )
+    plot_metric(
+        loss_axis,
+        data.metrics,
+        "validation_loss",
+        label="Validation loss",
+        phase="value_pretrain",
+    )
+    loss_axis.set_title("Huber loss")
+    loss_axis.set_xlabel("Epoch")
+    loss_axis.grid(alpha=0.25)
+    loss_axis.legend()
+
+    error_axis = axes[0, 1]
+    plot_metric(
+        error_axis,
+        data.metrics,
+        "validation_mae",
+        label="Validation MAE",
+        phase="value_pretrain",
+    )
+    plot_metric(
+        error_axis,
+        data.metrics,
+        "validation_rmse",
+        label="Validation RMSE",
+        phase="value_pretrain",
+    )
+    error_axis.set_title("Validation error")
+    error_axis.set_xlabel("Epoch")
+    error_axis.grid(alpha=0.25)
+    error_axis.legend()
+
+    explained_axis = axes[1, 0]
+    plot_metric(
+        explained_axis,
+        data.metrics,
+        "validation_explained_variance",
+        label="Explained variance",
+        phase="value_pretrain",
+    )
+    explained_axis.axhline(0, color="#777777", linewidth=1, alpha=0.6)
+    explained_axis.set_title("Value explained variance")
+    explained_axis.set_xlabel("Epoch")
+    explained_axis.grid(alpha=0.25)
+    explained_axis.legend()
+
+    spread_axis = axes[1, 1]
+    plot_metric(
+        spread_axis,
+        data.metrics,
+        "validation_target_std",
+        label="Target std",
+        phase="value_pretrain",
+    )
+    plot_metric(
+        spread_axis,
+        data.metrics,
+        "validation_prediction_std",
+        label="Prediction std",
+        phase="value_pretrain",
+    )
+    spread_axis.set_title("Value target and prediction spread")
+    spread_axis.set_xlabel("Epoch")
+    spread_axis.grid(alpha=0.25)
+    spread_axis.legend()
+
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output, dpi=160)
+    plt.close(figure)
+    return output
 
 
 def plot_learning_curves(data: ExperimentData, output_path: str | Path) -> Path:
@@ -842,23 +1080,28 @@ def main() -> None:
     parser.add_argument(
         "experiment_path",
         type=Path,
-        help="one experiment directory or a parent containing experiment directories",
+        help="one experiment directory or a parent whose experiments are all reported",
     )
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--no-plots", action="store_true")
     args = parser.parse_args()
 
-    result = generate_experiment_report(
+    results = generate_experiment_reports(
         args.experiment_path,
         output_dir=args.output_dir,
         create_plots=not args.no_plots,
     )
-    print(f"Experiment:      {result.experiment_dir}")
-    print(f"Text summary:    {result.summary_path}")
-    if result.learning_curves_path is not None:
-        print(f"Learning curves: {result.learning_curves_path}")
-    if result.game_outcomes_path is not None:
-        print(f"Game outcomes:   {result.game_outcomes_path}")
+    for index, result in enumerate(results):
+        if index:
+            print()
+        print(f"Experiment:      {result.experiment_dir}")
+        print(f"Text summary:    {result.summary_path}")
+        if result.learning_curves_path is not None:
+            print(f"Learning curves: {result.learning_curves_path}")
+        if result.game_outcomes_path is not None:
+            print(f"Game outcomes:   {result.game_outcomes_path}")
+    if len(results) > 1:
+        print(f"\nGenerated reports: {len(results)}")
 
 
 if __name__ == "__main__":

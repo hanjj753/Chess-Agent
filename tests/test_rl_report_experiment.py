@@ -1,10 +1,13 @@
 from pathlib import Path
 
 from chess_agent.rl.experiment_tracking import ExperimentLogger
-from chess_agent.rl.report_experiment import generate_experiment_report
+from chess_agent.rl.report_experiment import (
+    generate_experiment_report,
+    generate_experiment_reports,
+)
 
 
-def test_generate_experiment_report_from_latest_experiment(
+def test_generate_experiment_report_from_one_experiment(
     tmp_path: Path,
 ) -> None:
     logger = ExperimentLogger.create(
@@ -89,7 +92,7 @@ def test_generate_experiment_report_from_latest_experiment(
     )
     logger.save_summary({"completed_timesteps": 256})
 
-    result = generate_experiment_report(tmp_path)
+    result = generate_experiment_report(logger.run_dir)
 
     assert result.experiment_dir == logger.run_dir
     assert result.summary_path.is_file()
@@ -106,3 +109,49 @@ def test_generate_experiment_report_from_latest_experiment(
     assert "완결 대국 수" in report
     assert "rollout당 완결 대국이 평균 8판보다 적어" in report
     assert "reward가 0이 아닌 transition이 평균 1%보다 적어" in report
+
+
+def test_generate_experiment_reports_for_every_child_experiment(
+    tmp_path: Path,
+) -> None:
+    experiment_names = ("first", "second")
+    for experiment_name in experiment_names:
+        logger = ExperimentLogger.create(
+            tmp_path,
+            experiment_name=experiment_name,
+            run_id=f"run_{experiment_name}",
+            config={"total_timesteps": 1, "opponent": "random"},
+        )
+        logger.log_metrics(
+            step=1,
+            phase="train_update",
+            metrics={"value_loss": 0.1},
+        )
+        logger.log_game(
+            step=1,
+            phase="train",
+            episode=1,
+            result="1-0",
+            reward=1.0,
+            plies=1,
+            agent_color="white",
+            opponent="random",
+            termination="checkmate",
+        )
+
+    output_dir = tmp_path / "reports"
+    results = generate_experiment_reports(
+        tmp_path,
+        output_dir=output_dir,
+        create_plots=False,
+    )
+
+    assert [result.experiment_dir.name for result in results] == [
+        "run_first_first",
+        "run_second_second",
+    ]
+    assert all(result.summary_path.is_file() for result in results)
+    assert [result.output_dir for result in results] == [
+        output_dir / "run_first_first",
+        output_dir / "run_second_second",
+    ]
