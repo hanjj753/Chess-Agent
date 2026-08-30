@@ -93,6 +93,7 @@ class FullChessEnv(gym.Env):
         self.episode_plies = 0
         self.done = False
         self._board_history = [self.board.copy(stack=True)]
+        self.opponent.reset(seed=seed)
 
         opening_move = None
         if not self.board.is_game_over(claim_draw=True) and self.board.turn != self.agent_color:

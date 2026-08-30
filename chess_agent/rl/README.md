@@ -295,88 +295,80 @@ python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_rollout1024
 
 ### Alpha Curriculum
 
-Random 단계 다음에는 프로젝트의 alpha-beta agent를 고정 상대 삼아 난이도를 올립니다.
-Random과 Alpha를 한 대국 집합에 섞지 않고 단계별로 상대를 고정하므로, critic이 현재
-상대에 대한 기대 reward를 명확하게 학습할 수 있습니다.
+Random과 Alpha depth 1 사이의 난이도 차이를 줄이기 위해 `alpha-random` 상대를
+사용합니다. 이 상대는 **매 수마다** `--alpha-move-probability`의 확률로 Alpha 수를,
+나머지 확률로 Random 수를 선택합니다. 한 대국마다 상대 종류를 숨겨서 정하는 방식이
+아니므로, 각 단계는 하나의 고정된 stochastic transition을 갖습니다.
 
-#### 0. Random 결과 2,000판 재확인
+권장 순서는 `10% -> 25% -> 50% -> 75% -> 순수 Alpha`입니다. 각 단계는 이전 단계의
+best checkpoint에서 시작합니다.
 
-기존 500판 결과의 신뢰구간을 줄이기 위한 독립 seed 평가입니다.
+| 단계 | Alpha 수 확률 | 첫 추가 timestep | 시작 checkpoint |
+|---|---:|---:|---|
+| p10 smoke | 0.10 | 8,192 | Random 단계 best |
+| p25 | 0.25 | 16,384 | p10 best |
+| p50 | 0.50 | 16,384 | p25 best |
+| p75 | 0.75 | 32,768 | p50 best |
+| Alpha | 1.00 | 결과를 보고 결정 | p75 best |
+
+#### 1. Alpha 10% Baseline
+
+모델은 deterministic하게 두되 상대의 혼합 선택은 seed에 따라 달라집니다. 따라서
+500판이 동일한 대국의 반복이 되지 않으면서 현재 출발점의 점수율을 측정할 수 있습니다.
 
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_rollout1024_final.zip --games 2000 --opponent random --max-plies 100 --seed 30000 --device cuda --output-path analysis\ppo_rollout1024_final_random_2000.txt
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_value_random100_final.zip --games 2000 --opponent random --max-plies 100 --seed 30000 --device cuda --output-path analysis\ppo_value_random100_final_random_2000.txt
-.\.venv\Scripts\python -m chess_agent.rl.compare_full_chess_evaluations analysis\ppo_rollout1024_final_random_2000_games.csv analysis\ppo_value_random100_final_random_2000_games.csv --output-path analysis\ppo_rollout1024_vs_value_random100_random_2000.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_value_random100_best.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 30000 --device cuda --output-path analysis\ppo_value_random100_best_alpha_p10_500.txt
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_rollout1024_final.zip --games 2000 --opponent random --max-plies 100 --seed 30000 --device cuda --output-path analysis/ppo_rollout1024_final_random_2000.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_value_random100_final.zip --games 2000 --opponent random --max-plies 100 --seed 30000 --device cuda --output-path analysis/ppo_value_random100_final_random_2000.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_rollout1024_final_random_2000_games.csv analysis/ppo_value_random100_final_random_2000_games.csv --output-path analysis/ppo_rollout1024_vs_value_random100_random_2000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_value_random100_best.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 30000 --device cuda --output-path analysis/ppo_value_random100_best_alpha_p10_500.txt
 ```
 
-#### 1. Alpha Depth 1 Baseline
+#### 2. Alpha 10% Smoke 학습
 
-학습 전에 현재 Random 단계 best 모델이 Alpha에게 reward를 얻을 수 있는지 확인합니다.
+처음부터 오래 실행하지 않고 8,192 timestep만 추가합니다. `--additional-timesteps`는
+resume checkpoint의 기존 timestep 뒤에 지정한 양만큼 자동으로 더합니다.
 
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_value_random100_best.zip --games 500 --opponent alpha --opponent-depth 1 --max-plies 100 --seed 20000 --device cuda --output-path analysis\ppo_value_random100_best_alpha_d1_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp\full_chess_ppo_value_random100_best.zip --additional-timesteps 8192 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 2048 --evaluation-games 100 --checkpoint-every 2048 --seed 0 --device cuda --initial-model-path tmp\full_chess_ppo_alpha_p10_initial.zip --save-path tmp\full_chess_ppo_alpha_p10_final.zip --best-model-path tmp\full_chess_ppo_alpha_p10_best.zip --checkpoint-dir tmp\full_chess_ppo_alpha_p10_checkpoints --experiment-dir analysis\experiments --experiment-name ppo_curriculum_alpha_p10
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_value_random100_best.zip --games 500 --opponent alpha --opponent-depth 1 --max-plies 100 --seed 20000 --device cuda --output-path analysis/ppo_value_random100_best_alpha_d1_500.txt
+python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_value_random100_best.zip --additional-timesteps 8192 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 2048 --evaluation-games 100 --checkpoint-every 2048 --seed 0 --device cuda --initial-model-path tmp/full_chess_ppo_alpha_p10_initial.zip --save-path tmp/full_chess_ppo_alpha_p10_final.zip --best-model-path tmp/full_chess_ppo_alpha_p10_best.zip --checkpoint-dir tmp/full_chess_ppo_alpha_p10_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_curriculum_alpha_p10
 ```
 
-승리와 패배가 모두 관측되면 바로 다음 학습으로 진행합니다. 거의 모든 판이
-`max_plies` 무승부라면 0이 아닌 reward가 너무 희소하므로 종료 조건을 먼저 조정해야
-합니다. 반대로 거의 전패라면 음수 reward는 충분하지만 양수 사례가 없어 난이도가 높은
-상태이므로, 65,536 timestep 전체를 돌리기 전에 짧은 Alpha smoke stage를 먼저 확인합니다.
+#### 3. 시작 모델과 Best 모델 비교
 
-#### 2. Alpha Depth 1 추가 학습
-
-Random best checkpoint의 누적 timestep에서 65,536 timestep을 더 학습합니다.
-`--additional-timesteps`는 resume checkpoint의 기존 timestep을 자동으로 더하므로 누적
-목표를 직접 계산할 필요가 없습니다.
+학습 중 평가와 겹치지 않는 `seed=40000`을 두 모델에 동일하게 사용합니다.
 
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp\full_chess_ppo_value_random100_best.zip --additional-timesteps 65536 --opponent alpha --opponent-depth 1 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 8192 --evaluation-games 200 --checkpoint-every 8192 --seed 0 --device cuda --initial-model-path tmp\full_chess_ppo_alpha_d1_initial.zip --save-path tmp\full_chess_ppo_alpha_d1_final.zip --best-model-path tmp\full_chess_ppo_alpha_d1_best.zip --checkpoint-dir tmp\full_chess_ppo_alpha_d1_checkpoints --experiment-dir analysis\experiments --experiment-name ppo_curriculum_alpha_d1
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_alpha_p10_initial.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis\ppo_alpha_p10_initial_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_alpha_p10_best.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis\ppo_alpha_p10_best_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.compare_full_chess_evaluations analysis\ppo_alpha_p10_initial_500_games.csv analysis\ppo_alpha_p10_best_500_games.csv --output-path analysis\ppo_alpha_p10_initial_vs_best.txt
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_value_random100_best.zip --additional-timesteps 65536 --opponent alpha --opponent-depth 1 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 8192 --evaluation-games 200 --checkpoint-every 8192 --seed 0 --device cuda --initial-model-path tmp/full_chess_ppo_alpha_d1_initial.zip --save-path tmp/full_chess_ppo_alpha_d1_final.zip --best-model-path tmp/full_chess_ppo_alpha_d1_best.zip --checkpoint-dir tmp/full_chess_ppo_alpha_d1_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_curriculum_alpha_d1
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p10_initial.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis/ppo_alpha_p10_initial_500.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p10_best.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis/ppo_alpha_p10_best_500.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_alpha_p10_initial_500_games.csv analysis/ppo_alpha_p10_best_500_games.csv --output-path analysis/ppo_alpha_p10_initial_vs_best.txt
 ```
 
-#### 3. Alpha 단계 시작 모델과 Best 모델 비교
-
-학습 중 모델 선택에 쓴 seed와 겹치지 않는 `seed=40000`으로 평가합니다.
-
-Windows PowerShell:
-
-```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_alpha_d1_initial.zip --games 500 --opponent alpha --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis\ppo_alpha_d1_initial_500.txt
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_alpha_d1_best.zip --games 500 --opponent alpha --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis\ppo_alpha_d1_best_500.txt
-.\.venv\Scripts\python -m chess_agent.rl.compare_full_chess_evaluations analysis\ppo_alpha_d1_initial_500_games.csv analysis\ppo_alpha_d1_best_500_games.csv --output-path analysis\ppo_alpha_d1_initial_vs_best.txt
-```
-
-Linux:
-
-```bash
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_d1_initial.zip --games 500 --opponent alpha --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis/ppo_alpha_d1_initial_500.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_d1_best.zip --games 500 --opponent alpha --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis/ppo_alpha_d1_best_500.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_alpha_d1_initial_500_games.csv analysis/ppo_alpha_d1_best_500_games.csv --output-path analysis/ppo_alpha_d1_initial_vs_best.txt
-```
+score rate와 평균 reward가 유지되거나 개선되고 승리·무승부·패배가 모두 충분히
+관측되면 다음 확률로 넘어갑니다. 다음 단계에서는 이전 `best.zip`을 `--resume-from`에
+넣고 확률, timestep, 출력 파일의 `p10` 부분만 표에 맞게 바꿉니다. 점수율이 급락하면
+해당 단계에서 더 학습하고, 거의 전패하면 확률을 올리지 않습니다.
 
 ## 실험 과정 기록
 
@@ -628,8 +620,8 @@ python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_ab_lr3e5_in
 paired 결과입니다. 신뢰구간에 0이 포함되면 관측된 차이를 확실한 향상으로 보지 않습니다.
 
 평가 상대를 기존 tree agent로 바꾸려면 `--opponent alpha --opponent-depth 1`을
-사용합니다. 학습 상대에도 같은 옵션을 쓸 수 있지만 random보다 환경 step이 훨씬
-느려지므로 첫 실험은 random으로 진행합니다.
+사용합니다. 중간 난이도는 `--opponent alpha-random --alpha-move-probability 0.10`처럼
+지정합니다. Alpha 수가 포함되면 random보다 환경 step이 느려집니다.
 
 발표용으로 우선 볼 지표는 `evaluation/score_rate`, W/D/L, `average_plies`, 종료 원인,
 `value_loss`, `entropy`, `approx_kl`, `clip_fraction`입니다. `policy_loss`는 부호나

@@ -228,7 +228,7 @@ def test_full_chess_ppo_smoke_training_saves_logs_and_models(tmp_path: Path) -> 
     assert best_steps == [0]
 
 
-@pytest.mark.parametrize("opponent", ("random", "alpha"))
+@pytest.mark.parametrize("opponent", ("random", "alpha-random", "alpha"))
 def test_full_chess_ppo_evaluation_uses_only_legal_actions(opponent: str) -> None:
     config = smoke_config()
     env = make_vector_env(config)
@@ -252,6 +252,7 @@ def test_full_chess_ppo_evaluation_uses_only_legal_actions(opponent: str) -> Non
             history_length=1,
             max_plies=2,
             opponent=opponent,
+            alpha_move_probability=0.1,
             opponent_depth=1,
             opponent_time_limit=None,
             deterministic=True,
@@ -272,6 +273,14 @@ def test_full_chess_ppo_rejects_invalid_target_kl() -> None:
 def test_full_chess_ppo_rejects_dropout() -> None:
     with pytest.raises(ValueError, match="dropout=0"):
         validate_config(smoke_config(dropout=0.1))
+
+
+@pytest.mark.parametrize("probability", (-0.1, 1.1, float("inf")))
+def test_full_chess_ppo_rejects_invalid_alpha_probability(
+    probability: float,
+) -> None:
+    with pytest.raises(ValueError, match="alpha_move_probability"):
+        validate_config(smoke_config(alpha_move_probability=probability))
 
 
 def test_additional_timesteps_requires_resume_checkpoint() -> None:

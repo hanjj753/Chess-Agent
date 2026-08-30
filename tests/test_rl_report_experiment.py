@@ -16,7 +16,9 @@ def test_generate_experiment_report_from_one_experiment(
         run_id="test_run",
         config={
             "total_timesteps": 512,
-            "opponent": "random",
+            "opponent": "alpha-random",
+            "alpha_move_probability": 0.25,
+            "opponent_depth": 1,
             "learning_rate": 0.0001,
             "n_envs": 1,
             "n_steps": 256,
@@ -59,7 +61,7 @@ def test_generate_experiment_report_from_one_experiment(
         reward=1.0,
         plies=39,
         agent_color="white",
-        opponent="random",
+        opponent="alpha-random",
         termination="checkmate",
     )
     logger.log_game(
@@ -70,7 +72,7 @@ def test_generate_experiment_report_from_one_experiment(
         reward=0.0,
         plies=100,
         agent_color="black",
-        opponent="random",
+        opponent="alpha-random",
         termination="max_plies",
     )
     logger.log_game(
@@ -81,7 +83,7 @@ def test_generate_experiment_report_from_one_experiment(
         reward=-1.0,
         plies=44,
         agent_color="white",
-        opponent="random",
+        opponent="alpha-random",
         termination="checkmate",
     )
     logger.log_checkpoint(
@@ -109,6 +111,7 @@ def test_generate_experiment_report_from_one_experiment(
     assert "완결 대국 수" in report
     assert "rollout당 완결 대국이 평균 8판보다 적어" in report
     assert "reward가 0이 아닌 transition이 평균 1%보다 적어" in report
+    assert "alpha_move_probability=25.0%" in report
 
     assert generate_experiment_reports(logger.run_dir) == ()
     result.game_outcomes_path.unlink()

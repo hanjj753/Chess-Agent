@@ -20,6 +20,7 @@ def format_full_chess_report(
     seed: int | None = None,
     deterministic: bool | None = None,
     max_plies: int | None = None,
+    alpha_move_probability: float | None = None,
 ) -> str:
     lines = [
         "Full-chess PPO evaluation",
@@ -38,6 +39,8 @@ def format_full_chess_report(
         lines.append(f"Deterministic:  {'yes' if deterministic else 'no'}")
     if max_plies is not None:
         lines.append(f"Max plies:      {max_plies}")
+    if opponent == "alpha-random" and alpha_move_probability is not None:
+        lines.append(f"Alpha move prob:{alpha_move_probability:8.1%}")
     lines.extend(["", "Color breakdown", "Color   Games   W/D/L   Score"])
     for color in ("white", "black"):
         games = tuple(game for game in result.games if game.agent_color == color)
@@ -127,6 +130,12 @@ def main() -> None:
     parser.add_argument("--model-path", type=Path, required=True)
     parser.add_argument("--games", type=int, default=100)
     parser.add_argument("--opponent", choices=PPO_OPPONENTS, default="random")
+    parser.add_argument(
+        "--alpha-move-probability",
+        type=float,
+        default=0.1,
+        help="probability of an alpha move for the alpha-random opponent",
+    )
     parser.add_argument("--opponent-depth", type=int, default=1)
     parser.add_argument("--opponent-time-limit", type=float)
     parser.add_argument("--history-length", type=int)
@@ -150,6 +159,7 @@ def main() -> None:
         history_length=history_length,
         max_plies=args.max_plies,
         opponent=args.opponent,
+        alpha_move_probability=args.alpha_move_probability,
         opponent_depth=args.opponent_depth,
         opponent_time_limit=args.opponent_time_limit,
         deterministic=not args.stochastic,
@@ -162,6 +172,7 @@ def main() -> None:
         seed=args.seed,
         deterministic=not args.stochastic,
         max_plies=args.max_plies,
+        alpha_move_probability=args.alpha_move_probability,
     )
     print(report, end="")
     if args.output_path is not None:

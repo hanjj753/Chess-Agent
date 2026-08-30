@@ -2,6 +2,7 @@ import chess
 import numpy as np
 
 from chess_agent.agents.base import Agent
+from chess_agent.agents.alpha_random_agent import AlphaRandomAgent
 from chess_agent.rl.actions import move_to_action
 from chess_agent.rl.full_chess_env import FullChessEnv
 from chess_agent.rl.observations import (
@@ -100,6 +101,18 @@ def test_full_chess_env_plays_opening_opponent_move_when_agent_is_black() -> Non
     assert observation["action_mask"].sum() == len(list(env.board.legal_moves))
 
 
+def test_full_chess_env_reseeds_stochastic_opponent() -> None:
+    env = FullChessEnv(
+        opponent=AlphaRandomAgent(alpha_move_probability=0.5, depth=1),
+        agent_color=chess.BLACK,
+    )
+
+    _, first_info = env.reset(seed=123)
+    _, repeated_info = env.reset(seed=123)
+
+    assert first_info["opponent_move_uci"] == repeated_info["opponent_move_uci"]
+
+
 def test_full_chess_env_rewards_agent_checkmate() -> None:
     env = FullChessEnv(
         initial_fen="7k/8/5KQ1/8/8/8/8/8 w - - 0 1",
@@ -151,4 +164,3 @@ def test_full_chess_env_terminates_on_illegal_action() -> None:
     assert not truncated
     assert info["illegal_action"]
     assert info["termination"] == "illegal_action"
-

@@ -12,6 +12,7 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv
 
 from chess_agent.agents.alphabeta_agent import AlphaBetaAgent
+from chess_agent.agents.alpha_random_agent import AlphaRandomAgent
 from chess_agent.agents.base import Agent
 from chess_agent.agents.random_agent import RandomAgent
 from chess_agent.rl.experiment_tracking import ExperimentLogger
@@ -23,7 +24,7 @@ from chess_agent.rl.ppo_policy import (
 )
 
 
-PPO_OPPONENTS = ("random", "alpha")
+PPO_OPPONENTS = ("random", "alpha-random", "alpha")
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class FullChessPPOConfig:
     dropout: float = 0.0
     residual_blocks: int = 3
     opponent: str = "random"
+    alpha_move_probability: float = 0.1
     opponent_depth: int = 1
     opponent_time_limit: float | None = None
     evaluation_every: int = 10_000
@@ -514,6 +516,7 @@ def evaluate_full_chess_ppo(
     opponent_time_limit: float | None,
     deterministic: bool,
     seed: int,
+    alpha_move_probability: float = 0.1,
 ) -> FullChessEvaluationResult:
     if episodes < 0:
         raise ValueError("episodes must be non-negative")
@@ -521,6 +524,7 @@ def evaluate_full_chess_ppo(
         FullChessEnv(
             opponent=make_opponent(
                 opponent,
+                alpha_move_probability=alpha_move_probability,
                 depth=opponent_depth,
                 time_limit=opponent_time_limit,
             ),
@@ -578,6 +582,7 @@ def evaluate_full_chess_ppo_from_config(
         history_length=config.history_length,
         max_plies=config.max_plies,
         opponent=config.opponent,
+        alpha_move_probability=config.alpha_move_probability,
         opponent_depth=config.opponent_depth,
         opponent_time_limit=config.opponent_time_limit,
         deterministic=config.deterministic_evaluation,
@@ -600,6 +605,7 @@ def make_single_env(
     env = FullChessEnv(
         opponent=make_opponent(
             config.opponent,
+            alpha_move_probability=config.alpha_move_probability,
             depth=config.opponent_depth,
             time_limit=config.opponent_time_limit,
         ),
@@ -610,11 +616,23 @@ def make_single_env(
     return BoardOnlyObservation(Monitor(env))
 
 
-def make_opponent(kind: str, *, depth: int, time_limit: float | None) -> Agent:
+def make_opponent(
+    kind: str,
+    *,
+    alpha_move_probability: float = 0.1,
+    depth: int,
+    time_limit: float | None,
+) -> Agent:
     if kind == "random":
         return RandomAgent()
     if kind == "alpha":
         return AlphaBetaAgent(depth=depth, time_limit=time_limit)
+    if kind == "alpha-random":
+        return AlphaRandomAgent(
+            alpha_move_probability=alpha_move_probability,
+            depth=depth,
+            time_limit=time_limit,
+        )
     raise ValueError(f"unsupported PPO opponent: {kind}")
 
 
@@ -722,6 +740,10 @@ def validate_config(config: FullChessPPOConfig) -> None:
         raise ValueError("evaluation_games must be non-negative")
     if config.opponent not in PPO_OPPONENTS:
         raise ValueError(f"unsupported PPO opponent: {config.opponent}")
+    if not math.isfinite(config.alpha_move_probability) or not (
+        0.0 <= config.alpha_move_probability <= 1.0
+    ):
+        raise ValueError("alpha_move_probability must be between 0 and 1")
     if config.pretrained_policy_value_path is not None and config.resume_from is not None:
         raise ValueError("use pretrained_policy_value_path or resume_from, not both")
 
@@ -758,6 +780,12 @@ def main() -> None:
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--residual-blocks", type=int, default=3)
     parser.add_argument("--opponent", choices=PPO_OPPONENTS, default="random")
+    parser.add_argument(
+        "--alpha-move-probability",
+        type=float,
+        default=0.1,
+        help="probability of an alpha move for the alpha-random opponent",
+    )
     parser.add_argument("--opponent-depth", type=int, default=1)
     parser.add_argument("--opponent-time-limit", type=float)
     parser.add_argument("--evaluation-every", type=int, default=10_000)
@@ -815,6 +843,7 @@ def main() -> None:
             dropout=args.dropout,
             residual_blocks=args.residual_blocks,
             opponent=args.opponent,
+            alpha_move_probability=args.alpha_move_probability,
             opponent_depth=args.opponent_depth,
             opponent_time_limit=args.opponent_time_limit,
             evaluation_every=args.evaluation_every,

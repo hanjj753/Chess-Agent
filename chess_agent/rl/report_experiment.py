@@ -253,11 +253,16 @@ def build_text_report(data: ExperimentData) -> str:
             ]
         )
     opponent_lines = []
-    if config.get("opponent") == "alpha":
+    if config.get("opponent") in {"alpha", "alpha-random"}:
+        probability = ""
+        if config.get("opponent") == "alpha-random":
+            raw_probability = config.get("alpha_move_probability", 0.1)
+            probability = f", alpha_move_probability={float(raw_probability):.1%}"
         opponent_lines.append(
             "상대 설정:       "
             f"depth={config.get('opponent_depth', 'unknown')}, "
             f"time_limit={config.get('opponent_time_limit', 'none')}"
+            f"{probability}"
         )
     train_games = tuple(game for game in data.games if game.phase == "train")
     train_stats = summarize_games(train_games)

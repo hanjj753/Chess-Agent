@@ -38,11 +38,12 @@ def test_full_chess_evaluation_report_can_be_saved(tmp_path: Path) -> None:
     )
     report = format_full_chess_report(
         model_path="tmp/model.zip",
-        opponent="random",
+        opponent="alpha-random",
         result=result,
         seed=100,
         deterministic=True,
         max_plies=300,
+        alpha_move_probability=0.25,
     )
     output_path = tmp_path / "reports" / "full_chess.txt"
 
@@ -56,6 +57,7 @@ def test_full_chess_evaluation_report_can_be_saved(tmp_path: Path) -> None:
     assert "max_plies" in saved
     assert "Base seed:      100" in saved
     assert "Deterministic:  yes" in saved
+    assert "Alpha move prob:   25.0%" in saved
 
     games_path = default_games_output_path(output_path)
     save_game_results_csv(games_path, result=result, base_seed=100)
