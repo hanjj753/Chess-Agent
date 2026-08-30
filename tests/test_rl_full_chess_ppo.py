@@ -158,6 +158,9 @@ def test_full_chess_ppo_smoke_training_saves_logs_and_models(tmp_path: Path) -> 
 
     assert isinstance(model, MaskablePPO)
     assert result.completed_timesteps == 4
+    assert result.start_timesteps == 0
+    assert result.target_timesteps == 4
+    assert result.trained_timesteps == 4
     assert result.initial_model_path.exists()
     assert result.final_model_path.exists()
     assert result.best_model_path.exists()
@@ -225,7 +228,8 @@ def test_full_chess_ppo_smoke_training_saves_logs_and_models(tmp_path: Path) -> 
     assert best_steps == [0]
 
 
-def test_full_chess_ppo_evaluation_uses_only_legal_actions() -> None:
+@pytest.mark.parametrize("opponent", ("random", "alpha"))
+def test_full_chess_ppo_evaluation_uses_only_legal_actions(opponent: str) -> None:
     config = smoke_config()
     env = make_vector_env(config)
     try:
@@ -247,7 +251,7 @@ def test_full_chess_ppo_evaluation_uses_only_legal_actions() -> None:
             episodes=2,
             history_length=1,
             max_plies=2,
-            opponent="random",
+            opponent=opponent,
             opponent_depth=1,
             opponent_time_limit=None,
             deterministic=True,
@@ -268,6 +272,38 @@ def test_full_chess_ppo_rejects_invalid_target_kl() -> None:
 def test_full_chess_ppo_rejects_dropout() -> None:
     with pytest.raises(ValueError, match="dropout=0"):
         validate_config(smoke_config(dropout=0.1))
+
+
+def test_additional_timesteps_requires_resume_checkpoint() -> None:
+    with pytest.raises(ValueError, match="requires resume_from"):
+        validate_config(smoke_config(additional_timesteps=2))
+
+
+def test_full_chess_ppo_resume_can_add_stage_timesteps(tmp_path: Path) -> None:
+    _, first = train_full_chess_ppo(
+        smoke_config(
+            total_timesteps=2,
+            save_path=tmp_path / "first.zip",
+            initial_model_path=tmp_path / "first_initial.zip",
+            best_model_path=tmp_path / "first_best.zip",
+        )
+    )
+
+    _, resumed = train_full_chess_ppo(
+        smoke_config(
+            total_timesteps=0,
+            additional_timesteps=2,
+            resume_from=first.final_model_path,
+            save_path=tmp_path / "resumed.zip",
+            initial_model_path=tmp_path / "resumed_initial.zip",
+            best_model_path=tmp_path / "resumed_best.zip",
+        )
+    )
+
+    assert resumed.start_timesteps == 2
+    assert resumed.target_timesteps == 4
+    assert resumed.trained_timesteps == 2
+    assert resumed.completed_timesteps == 4
 
 
 def smoke_config(**overrides: object) -> FullChessPPOConfig:

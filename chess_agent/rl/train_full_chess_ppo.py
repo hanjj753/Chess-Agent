@@ -29,6 +29,7 @@ PPO_OPPONENTS = ("random", "alpha")
 @dataclass(frozen=True)
 class FullChessPPOConfig:
     total_timesteps: int = 100_000
+    additional_timesteps: int | None = None
     learning_rate: float = 3e-5
     n_envs: int = 4
     n_steps: int = 256
@@ -123,6 +124,9 @@ class FullChessEvaluationResult:
 @dataclass(frozen=True)
 class FullChessPPOTrainingResult:
     completed_timesteps: int
+    start_timesteps: int
+    target_timesteps: int
+    trained_timesteps: int
     initial_model_path: Path
     final_model_path: Path
     best_model_path: Path
@@ -385,12 +389,23 @@ def train_full_chess_ppo(
                 )
 
         model.experiment_logger = experiment_logger
-        if model.num_timesteps > config.total_timesteps:
+        start_timesteps = model.num_timesteps
+        target_timesteps = (
+            start_timesteps + config.additional_timesteps
+            if config.additional_timesteps is not None
+            else config.total_timesteps
+        )
+        if start_timesteps > target_timesteps:
             raise ValueError(
                 "resume checkpoint already exceeds the requested total_timesteps"
             )
 
-        remaining_timesteps = config.total_timesteps - model.num_timesteps
+        remaining_timesteps = target_timesteps - start_timesteps
+        print(
+            f"Training timesteps: start={start_timesteps:,} "
+            f"additional={remaining_timesteps:,} target={target_timesteps:,}",
+            flush=True,
+        )
         initial_model_path = save_ppo_model(model, config.initial_model_path)
         if experiment_logger is not None:
             experiment_logger.log_checkpoint(
@@ -470,6 +485,9 @@ def train_full_chess_ppo(
 
         result = FullChessPPOTrainingResult(
             completed_timesteps=model.num_timesteps,
+            start_timesteps=start_timesteps,
+            target_timesteps=target_timesteps,
+            trained_timesteps=model.num_timesteps - start_timesteps,
             initial_model_path=initial_model_path,
             final_model_path=final_model_path,
             best_model_path=best_model_path,
@@ -672,6 +690,11 @@ def next_interval(current_step: int, interval: int) -> int:
 def validate_config(config: FullChessPPOConfig) -> None:
     if config.total_timesteps < 0:
         raise ValueError("total_timesteps must be non-negative")
+    if config.additional_timesteps is not None:
+        if config.additional_timesteps < 0:
+            raise ValueError("additional_timesteps must be non-negative")
+        if config.resume_from is None:
+            raise ValueError("additional_timesteps requires resume_from")
     if not math.isfinite(config.learning_rate) or config.learning_rate <= 0:
         raise ValueError("learning_rate must be positive")
     if config.n_envs < 1 or config.n_steps < 1:
@@ -706,6 +729,11 @@ def validate_config(config: FullChessPPOConfig) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--total-timesteps", type=int, default=100_000)
+    parser.add_argument(
+        "--additional-timesteps",
+        type=int,
+        help="timesteps to train beyond --resume-from instead of a cumulative target",
+    )
     parser.add_argument("--learning-rate", type=float, default=3e-5)
     parser.add_argument("--n-envs", type=int, default=4)
     parser.add_argument("--n-steps", type=int, default=256)
@@ -768,6 +796,7 @@ def main() -> None:
     _, result = train_full_chess_ppo(
         FullChessPPOConfig(
             total_timesteps=args.total_timesteps,
+            additional_timesteps=args.additional_timesteps,
             learning_rate=args.learning_rate,
             n_envs=args.n_envs,
             n_steps=args.n_steps,
@@ -808,7 +837,9 @@ def main() -> None:
 
     print()
     print("Full-chess PPO training summary")
-    print(f"Timesteps:       {result.completed_timesteps}")
+    print(f"Start timesteps: {result.start_timesteps}")
+    print(f"Added timesteps: {result.trained_timesteps}")
+    print(f"Final timesteps: {result.completed_timesteps}")
     print(f"Initial model:   {result.initial_model_path}")
     print(f"Final model:     {result.final_model_path}")
     print(f"Best model:      {result.best_model_path}")

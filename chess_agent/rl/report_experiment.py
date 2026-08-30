@@ -230,10 +230,35 @@ def load_experiment(directory: str | Path) -> ExperimentData:
 
 def build_text_report(data: ExperimentData) -> str:
     config = data.config
+    result_summary = data.summary_document.get("summary", {})
+    if not isinstance(result_summary, dict):
+        result_summary = {}
     experiment_name = str(
         data.config_document.get("experiment_name", data.directory.name)
     )
     completed_step = completed_timesteps(data)
+    target_step = result_summary.get(
+        "target_timesteps",
+        config.get("total_timesteps"),
+    )
+    stage_lines = []
+    if (
+        "start_timesteps" in result_summary
+        and "trained_timesteps" in result_summary
+    ):
+        stage_lines.extend(
+            [
+                f"단계 시작:       {format_int(result_summary['start_timesteps'])}",
+                f"이번 단계 학습:  {format_int(result_summary['trained_timesteps'])}",
+            ]
+        )
+    opponent_lines = []
+    if config.get("opponent") == "alpha":
+        opponent_lines.append(
+            "상대 설정:       "
+            f"depth={config.get('opponent_depth', 'unknown')}, "
+            f"time_limit={config.get('opponent_time_limit', 'none')}"
+        )
     train_games = tuple(game for game in data.games if game.phase == "train")
     train_stats = summarize_games(train_games)
     evaluation_groups = grouped_evaluation_games(data.games)
@@ -269,14 +294,16 @@ def build_text_report(data: ExperimentData) -> str:
         f"실험 이름:       {experiment_name}",
         f"실험 폴더:       {data.directory}",
         f"완료 timestep:   {completed_step:,}",
-        f"목표 timestep:   {format_int(config.get('total_timesteps'))}",
+        f"목표 timestep:   {format_int(target_step)}",
         f"학습 상대:       {config.get('opponent', 'unknown')}",
+        *opponent_lines,
         f"학습률:          {config.get('learning_rate', 'unknown')}",
         f"rollout:         n_envs={config.get('n_envs', '?')} x n_steps={config.get('n_steps', '?')}",
         f"PPO update:      batch={config.get('batch_size', '?')}, epochs={config.get('n_epochs', '?')}",
         f"PPO limits:      clip={config.get('clip_range', '?')}, target_kl={config.get('target_kl', '?')}",
         f"게임 제한:       max_plies={config.get('max_plies', '?')}",
         f"소요 시간:       {experiment_duration(data)}",
+        *stage_lines,
         "",
         "단위 설명",
         "---------",

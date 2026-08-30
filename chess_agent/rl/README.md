@@ -293,6 +293,91 @@ python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo
 python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_rollout1024_final_500_games.csv analysis/ppo_value_random100_final_500_games.csv --output-path analysis/ppo_rollout1024_vs_value_random100_final.txt
 ```
 
+### Alpha Curriculum
+
+Random 단계 다음에는 프로젝트의 alpha-beta agent를 고정 상대 삼아 난이도를 올립니다.
+Random과 Alpha를 한 대국 집합에 섞지 않고 단계별로 상대를 고정하므로, critic이 현재
+상대에 대한 기대 reward를 명확하게 학습할 수 있습니다.
+
+#### 0. Random 결과 2,000판 재확인
+
+기존 500판 결과의 신뢰구간을 줄이기 위한 독립 seed 평가입니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_rollout1024_final.zip --games 2000 --opponent random --max-plies 100 --seed 30000 --device cuda --output-path analysis\ppo_rollout1024_final_random_2000.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_value_random100_final.zip --games 2000 --opponent random --max-plies 100 --seed 30000 --device cuda --output-path analysis\ppo_value_random100_final_random_2000.txt
+.\.venv\Scripts\python -m chess_agent.rl.compare_full_chess_evaluations analysis\ppo_rollout1024_final_random_2000_games.csv analysis\ppo_value_random100_final_random_2000_games.csv --output-path analysis\ppo_rollout1024_vs_value_random100_random_2000.txt
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_rollout1024_final.zip --games 2000 --opponent random --max-plies 100 --seed 30000 --device cuda --output-path analysis/ppo_rollout1024_final_random_2000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_value_random100_final.zip --games 2000 --opponent random --max-plies 100 --seed 30000 --device cuda --output-path analysis/ppo_value_random100_final_random_2000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_rollout1024_final_random_2000_games.csv analysis/ppo_value_random100_final_random_2000_games.csv --output-path analysis/ppo_rollout1024_vs_value_random100_random_2000.txt
+```
+
+#### 1. Alpha Depth 1 Baseline
+
+학습 전에 현재 Random 단계 best 모델이 Alpha에게 reward를 얻을 수 있는지 확인합니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_value_random100_best.zip --games 500 --opponent alpha --opponent-depth 1 --max-plies 100 --seed 20000 --device cuda --output-path analysis\ppo_value_random100_best_alpha_d1_500.txt
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_value_random100_best.zip --games 500 --opponent alpha --opponent-depth 1 --max-plies 100 --seed 20000 --device cuda --output-path analysis/ppo_value_random100_best_alpha_d1_500.txt
+```
+
+승리와 패배가 모두 관측되면 바로 다음 학습으로 진행합니다. 거의 모든 판이
+`max_plies` 무승부라면 0이 아닌 reward가 너무 희소하므로 종료 조건을 먼저 조정해야
+합니다. 반대로 거의 전패라면 음수 reward는 충분하지만 양수 사례가 없어 난이도가 높은
+상태이므로, 65,536 timestep 전체를 돌리기 전에 짧은 Alpha smoke stage를 먼저 확인합니다.
+
+#### 2. Alpha Depth 1 추가 학습
+
+Random best checkpoint의 누적 timestep에서 65,536 timestep을 더 학습합니다.
+`--additional-timesteps`는 resume checkpoint의 기존 timestep을 자동으로 더하므로 누적
+목표를 직접 계산할 필요가 없습니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp\full_chess_ppo_value_random100_best.zip --additional-timesteps 65536 --opponent alpha --opponent-depth 1 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 8192 --evaluation-games 200 --checkpoint-every 8192 --seed 0 --device cuda --initial-model-path tmp\full_chess_ppo_alpha_d1_initial.zip --save-path tmp\full_chess_ppo_alpha_d1_final.zip --best-model-path tmp\full_chess_ppo_alpha_d1_best.zip --checkpoint-dir tmp\full_chess_ppo_alpha_d1_checkpoints --experiment-dir analysis\experiments --experiment-name ppo_curriculum_alpha_d1
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_value_random100_best.zip --additional-timesteps 65536 --opponent alpha --opponent-depth 1 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 8192 --evaluation-games 200 --checkpoint-every 8192 --seed 0 --device cuda --initial-model-path tmp/full_chess_ppo_alpha_d1_initial.zip --save-path tmp/full_chess_ppo_alpha_d1_final.zip --best-model-path tmp/full_chess_ppo_alpha_d1_best.zip --checkpoint-dir tmp/full_chess_ppo_alpha_d1_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_curriculum_alpha_d1
+```
+
+#### 3. Alpha 단계 시작 모델과 Best 모델 비교
+
+학습 중 모델 선택에 쓴 seed와 겹치지 않는 `seed=40000`으로 평가합니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_alpha_d1_initial.zip --games 500 --opponent alpha --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis\ppo_alpha_d1_initial_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_alpha_d1_best.zip --games 500 --opponent alpha --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis\ppo_alpha_d1_best_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.compare_full_chess_evaluations analysis\ppo_alpha_d1_initial_500_games.csv analysis\ppo_alpha_d1_best_500_games.csv --output-path analysis\ppo_alpha_d1_initial_vs_best.txt
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_d1_initial.zip --games 500 --opponent alpha --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis/ppo_alpha_d1_initial_500.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_d1_best.zip --games 500 --opponent alpha --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis/ppo_alpha_d1_best_500.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_alpha_d1_initial_500_games.csv analysis/ppo_alpha_d1_best_500_games.csv --output-path analysis/ppo_alpha_d1_initial_vs_best.txt
+```
+
 ## 실험 과정 기록
 
 학습 명령에 `--experiment-dir`을 지정하면 실행마다 timestamp가 붙은 별도 폴더를
