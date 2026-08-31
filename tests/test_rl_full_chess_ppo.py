@@ -209,10 +209,19 @@ def test_full_chess_ppo_smoke_training_saves_logs_and_models(tmp_path: Path) -> 
         "completed_games",
         "decisive_games",
         "reward_signal_rate",
+        "extrinsic_reward_signal_rate",
+        "shaping_reward_signal_rate",
+        "training_reward_signal_rate",
+        "mean_abs_shaping_reward",
+        "mean_abs_training_reward",
         "return_std",
         "value_prediction_std",
         "advantage_std",
     } <= rollout_metric_names
+    assert all(
+        {"extrinsic_reward", "shaping_reward", "training_reward"} <= row.keys()
+        for row in game_rows
+    )
 
     events = [
         json.loads(line)
@@ -273,6 +282,22 @@ def test_full_chess_ppo_rejects_invalid_target_kl() -> None:
 def test_full_chess_ppo_rejects_dropout() -> None:
     with pytest.raises(ValueError, match="dropout=0"):
         validate_config(smoke_config(dropout=0.1))
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    (
+        ({"reward_shaping_coefficient": -0.1}, "coefficient"),
+        ({"reward_shaping_scale": 0.0}, "scale"),
+        ({"reward_shaping_scale": float("inf")}, "scale"),
+    ),
+)
+def test_full_chess_ppo_rejects_invalid_reward_shaping(
+    overrides: dict[str, float],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        validate_config(smoke_config(**overrides))
 
 
 @pytest.mark.parametrize("probability", (-0.1, 1.1, float("inf")))

@@ -4,6 +4,7 @@ from chess_agent.rl.experiment_tracking import ExperimentLogger
 from chess_agent.rl.report_experiment import (
     generate_experiment_report,
     generate_experiment_reports,
+    read_games,
 )
 
 
@@ -165,6 +166,73 @@ def test_generate_experiment_reports_for_every_child_experiment(
         output_dir / "run_first_first",
         output_dir / "run_second_second",
     ]
+
+
+def test_report_describes_reward_shaping(tmp_path: Path) -> None:
+    logger = ExperimentLogger.create(
+        tmp_path,
+        experiment_name="shaping report",
+        run_id="test_run",
+        config={
+            "total_timesteps": 256,
+            "opponent": "alpha-random",
+            "reward_shaping_coefficient": 0.05,
+            "reward_shaping_scale": 600.0,
+            "gamma": 0.995,
+        },
+    )
+    logger.log_metrics(
+        step=256,
+        phase="rollout",
+        metrics={
+            "transitions": 256,
+            "extrinsic_reward_signal_rate": 0.005,
+            "shaping_reward_signal_rate": 0.9,
+            "training_reward_signal_rate": 0.9,
+            "mean_abs_shaping_reward": 0.01,
+            "mean_abs_training_reward": 0.02,
+        },
+    )
+    logger.log_game(
+        step=256,
+        phase="train",
+        episode=1,
+        result="1/2-1/2",
+        reward=0.0,
+        extrinsic_reward=0.0,
+        shaping_reward=0.1,
+        training_reward=0.1,
+        plies=100,
+        agent_color="white",
+        opponent="alpha-random",
+        termination="max_plies",
+    )
+
+    result = generate_experiment_report(logger.run_dir, create_plots=False)
+    report = result.summary_path.read_text(encoding="utf-8")
+
+    assert "Reward shaping:   beta=0.05, scale=600 cp, gamma=0.995" in report
+    assert "평균 extrinsic reward: 0.0000" in report
+    assert "평균 shaping reward:   0.1000" in report
+    assert "전체 학습 신호 비율" in report
+    assert "학습 신호가 매우 희소합니다" not in report
+
+
+def test_read_games_supports_legacy_reward_columns(tmp_path: Path) -> None:
+    games_path = tmp_path / "games.csv"
+    games_path.write_text(
+        "timestamp,step,phase,episode,result,reward,plies,agent_color,opponent,termination,checkpoint\n"
+        "2026-01-01T00:00:00+00:00,10,train,1,1-0,1.0,41,white,random,checkmate,\n",
+        encoding="utf-8",
+    )
+
+    games = read_games(games_path)
+
+    assert len(games) == 1
+    assert games[0].reward == 1.0
+    assert games[0].extrinsic_reward == 1.0
+    assert games[0].shaping_reward == 0.0
+    assert games[0].training_reward == 1.0
 
 
 def test_generate_experiment_reports_skips_complete_reports_unless_forced(

@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,7 @@ import numpy as np
 
 from chess_agent.agents.base import Agent
 from chess_agent.agents.random_agent import RandomAgent
+from chess_agent.engine.evaluation import evaluate
 from chess_agent.rl.actions import ACTION_SIZE, action_to_move, legal_action_mask
 from chess_agent.rl.observations import (
     boards_to_history_observation,
@@ -33,6 +35,9 @@ class FullChessEnv(gym.Env):
         draw_reward: float = 0.0,
         loss_reward: float = -1.0,
         illegal_action_reward: float = -1.0,
+        reward_shaping_coefficient: float = 0.0,
+        reward_shaping_scale: float = 600.0,
+        reward_shaping_gamma: float = 0.995,
     ) -> None:
         if render_mode is not None and render_mode not in self.metadata["render_modes"]:
             raise ValueError(f"unsupported render_mode: {render_mode}")
@@ -40,6 +45,16 @@ class FullChessEnv(gym.Env):
             raise ValueError("history_length must be non-negative")
         if max_plies < 1:
             raise ValueError("max_plies must be positive")
+        if not math.isfinite(reward_shaping_coefficient) or (
+            reward_shaping_coefficient < 0
+        ):
+            raise ValueError("reward_shaping_coefficient must be non-negative")
+        if not math.isfinite(reward_shaping_scale) or reward_shaping_scale <= 0:
+            raise ValueError("reward_shaping_scale must be positive")
+        if not math.isfinite(reward_shaping_gamma) or not (
+            0.0 <= reward_shaping_gamma <= 1.0
+        ):
+            raise ValueError("reward_shaping_gamma must be between 0 and 1")
         validate_initial_fen(initial_fen)
 
         self.opponent = opponent or RandomAgent()
@@ -52,6 +67,9 @@ class FullChessEnv(gym.Env):
         self.draw_reward = draw_reward
         self.loss_reward = loss_reward
         self.illegal_action_reward = illegal_action_reward
+        self.reward_shaping_coefficient = reward_shaping_coefficient
+        self.reward_shaping_scale = reward_shaping_scale
+        self.reward_shaping_gamma = reward_shaping_gamma
 
         self.action_space = spaces.Discrete(ACTION_SIZE)
         self.observation_space = spaces.Dict(
@@ -76,6 +94,9 @@ class FullChessEnv(gym.Env):
         self.episode_plies = 0
         self.done = False
         self._board_history: list[chess.Board] = []
+        self._position_potential = 0.0
+        self._episode_extrinsic_reward = 0.0
+        self._episode_shaping_reward = 0.0
 
     def reset(
         self,
@@ -93,6 +114,8 @@ class FullChessEnv(gym.Env):
         self.episode_plies = 0
         self.done = False
         self._board_history = [self.board.copy(stack=True)]
+        self._episode_extrinsic_reward = 0.0
+        self._episode_shaping_reward = 0.0
         self.opponent.reset(seed=seed)
 
         opening_move = None
@@ -101,6 +124,9 @@ class FullChessEnv(gym.Env):
 
         if self.board.is_game_over(claim_draw=True):
             self.done = True
+        self._position_potential = (
+            0.0 if self.done else self._current_position_potential()
+        )
 
         return self._observation(), self._info(opponent_move_uci=opening_move)
 
@@ -119,25 +145,38 @@ class FullChessEnv(gym.Env):
             move = action_to_move(int(action))
         except (TypeError, ValueError):
             self.done = True
+            reward, reward_info = self._compose_reward(
+                self.illegal_action_reward,
+                true_terminal=True,
+            )
             return (
                 self._observation(),
-                self.illegal_action_reward,
+                reward,
                 True,
                 False,
-                self._info(illegal_action=True, termination="illegal_action"),
+                self._info(
+                    illegal_action=True,
+                    termination="illegal_action",
+                    **reward_info,
+                ),
             )
 
         if move not in board.legal_moves:
             self.done = True
+            reward, reward_info = self._compose_reward(
+                self.illegal_action_reward,
+                true_terminal=True,
+            )
             return (
                 self._observation(),
-                self.illegal_action_reward,
+                reward,
                 True,
                 False,
                 self._info(
                     illegal_action=True,
                     move_uci=move.uci(),
                     termination="illegal_action",
+                    **reward_info,
                 ),
             )
 
@@ -169,9 +208,10 @@ class FullChessEnv(gym.Env):
                 opponent_move_uci=opponent_move,
             )
 
+        reward, reward_info = self._compose_reward(0.0, true_terminal=False)
         return (
             self._observation(),
-            0.0,
+            reward,
             False,
             False,
             self._info(
@@ -179,6 +219,7 @@ class FullChessEnv(gym.Env):
                 move_uci=move.uci(),
                 move_san=move_san,
                 opponent_move_uci=opponent_move,
+                **reward_info,
             ),
         )
 
@@ -239,7 +280,10 @@ class FullChessEnv(gym.Env):
         **extra: Any,
     ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         self.done = True
-        reward = self._outcome_reward(outcome)
+        reward, reward_info = self._compose_reward(
+            self._outcome_reward(outcome),
+            true_terminal=True,
+        )
         return (
             self._observation(),
             reward,
@@ -249,6 +293,7 @@ class FullChessEnv(gym.Env):
                 illegal_action=False,
                 result=outcome.result(),
                 termination=outcome.termination.name.lower(),
+                **reward_info,
                 **extra,
             ),
         )
@@ -258,15 +303,20 @@ class FullChessEnv(gym.Env):
         **extra: Any,
     ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         self.done = True
+        reward, reward_info = self._compose_reward(
+            self.draw_reward,
+            true_terminal=False,
+        )
         return (
             self._observation(),
-            self.draw_reward,
+            reward,
             False,
             True,
             self._info(
                 illegal_action=False,
                 result="1/2-1/2",
                 termination="max_plies",
+                **reward_info,
                 **extra,
             ),
         )
@@ -277,6 +327,38 @@ class FullChessEnv(gym.Env):
         if outcome.winner == self._require_agent_color():
             return self.win_reward
         return self.loss_reward
+
+    def _compose_reward(
+        self,
+        extrinsic_reward: float,
+        *,
+        true_terminal: bool,
+    ) -> tuple[float, dict[str, float]]:
+        previous_potential = self._position_potential
+        next_potential = (
+            0.0 if true_terminal else self._current_position_potential()
+        )
+        shaping_reward = self.reward_shaping_coefficient * (
+            self.reward_shaping_gamma * next_potential - previous_potential
+        )
+        training_reward = float(extrinsic_reward) + shaping_reward
+        self._position_potential = next_potential
+        self._episode_extrinsic_reward += float(extrinsic_reward)
+        self._episode_shaping_reward += shaping_reward
+        return training_reward, {
+            "extrinsic_reward": float(extrinsic_reward),
+            "shaping_reward": shaping_reward,
+            "training_reward": training_reward,
+        }
+
+    def _current_position_potential(self) -> float:
+        if self.reward_shaping_coefficient == 0:
+            return 0.0
+        return normalized_evaluation_potential(
+            self._require_board(),
+            perspective=self._require_agent_color(),
+            scale=self.reward_shaping_scale,
+        )
 
     def _observation(self) -> dict[str, np.ndarray]:
         return {
@@ -308,6 +390,12 @@ class FullChessEnv(gym.Env):
             ),
             "result": "*",
             "termination": None,
+            "position_potential": self._position_potential,
+            "episode_extrinsic_reward": self._episode_extrinsic_reward,
+            "episode_shaping_reward": self._episode_shaping_reward,
+            "episode_training_reward": (
+                self._episode_extrinsic_reward + self._episode_shaping_reward
+            ),
         }
         info.update(extra)
         return info
@@ -321,6 +409,21 @@ class FullChessEnv(gym.Env):
         if self.agent_color is None:
             raise RuntimeError("reset() must be called before using the environment")
         return self.agent_color
+
+
+def normalized_evaluation_potential(
+    board: chess.Board,
+    *,
+    perspective: chess.Color,
+    scale: float,
+) -> float:
+    """Return the static evaluation normalized to [-1, 1]."""
+    if not math.isfinite(scale) or scale <= 0:
+        raise ValueError("scale must be positive")
+    score = evaluate(board)
+    if board.turn != perspective:
+        score = -score
+    return math.tanh(score / scale)
 
 
 class BoardOnlyObservation(gym.ObservationWrapper):

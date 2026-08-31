@@ -370,6 +370,42 @@ score rate와 평균 reward가 유지되거나 개선되고 승리·무승부·�
 넣고 확률, timestep, 출력 파일의 `p10` 부분만 표에 맞게 바꿉니다. 점수율이 급락하면
 해당 단계에서 더 학습하고, 거의 전패하면 확률을 올리지 않습니다.
 
+### Potential-Based Reward Shaping
+
+승패 reward만 사용하면 긴 대국 중 대부분의 transition이 `0`이 됩니다. 다음 식으로
+기존 평가 함수의 변화를 작은 보조 reward로 추가할 수 있습니다.
+
+```text
+r_shaping = beta * (gamma * Phi(next_state) - Phi(current_state))
+Phi(state) = tanh(agent 관점 평가 점수 / scale)
+r_training = r_extrinsic + r_shaping
+```
+
+`r_extrinsic`은 기존 승리 `+1`, 무승부 `0`, 패배 `-1`입니다. 진짜 게임 종료 상태의
+`Phi`는 0으로 두며, `max_plies` truncation에서는 마지막 상태의 `Phi`를 유지합니다.
+`beta=0`이 기본값이므로 옵션을 생략하면 이전 학습과 완전히 같은 reward를 사용합니다.
+
+p25에서 shaping 효과만 비교하는 첫 실험은 발전이 확인되지 않은 p25 final 대신
+p25 시작 checkpoint에서 다시 출발합니다.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp\full_chess_ppo_alpha_p25_initial.zip --additional-timesteps 16384 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --reward-shaping-coefficient 0.05 --reward-shaping-scale 600 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 --seed 0 --device cuda --initial-model-path tmp\full_chess_ppo_alpha_p25_shaping_initial.zip --save-path tmp\full_chess_ppo_alpha_p25_shaping_final.zip --best-model-path tmp\full_chess_ppo_alpha_p25_shaping_best.zip --checkpoint-dir tmp\full_chess_ppo_alpha_p25_shaping_checkpoints --experiment-dir analysis\experiments --experiment-name ppo_alpha_p25_shaping_beta005
+```
+
+Linux:
+
+```bash
+python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_alpha_p25_initial.zip --additional-timesteps 16384 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --reward-shaping-coefficient 0.05 --reward-shaping-scale 600 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 --seed 0 --device cuda --initial-model-path tmp/full_chess_ppo_alpha_p25_shaping_initial.zip --save-path tmp/full_chess_ppo_alpha_p25_shaping_final.zip --best-model-path tmp/full_chess_ppo_alpha_p25_shaping_best.zip --checkpoint-dir tmp/full_chess_ppo_alpha_p25_shaping_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_alpha_p25_shaping_beta005
+```
+
+best checkpoint 선택용 평가는 shaping을 사용하지 않고 실제 승·무·패만 사용합니다.
+`games.csv`의 `reward`와 `extrinsic_reward`도 실제 대국 결과를 유지하고,
+`shaping_reward`, `training_reward`에 학습용 reward를 별도로 기록합니다. 자동 보고서의
+`extrinsic 신호 비율`과 `전체 학습 신호 비율`을 비교하면 shaping이 희소성을 얼마나
+줄였는지 볼 수 있습니다.
+
 ## 실험 과정 기록
 
 학습 명령에 `--experiment-dir`을 지정하면 실행마다 timestamp가 붙은 별도 폴더를
@@ -391,7 +427,7 @@ python -m chess_agent.rl.train_tactical_supervised --puzzles-file data/puzzle_pr
 
 - `config.json`: hyperparameter, 데이터 경로, 모델 설정
 - `metrics.csv`: epoch/step별 loss, accuracy, reward, 승률 등의 긴 형식 데이터
-- `games.csv`: episode별 승패, 색, reward, ply, 종료 원인
+- `games.csv`: episode별 승패, 색, extrinsic/shaping/training reward, ply, 종료 원인
 - `events.jsonl`: best checkpoint 저장 같은 시간 순서 이벤트
 - `summary.json`: 실험 종료 시점의 최종 요약
 

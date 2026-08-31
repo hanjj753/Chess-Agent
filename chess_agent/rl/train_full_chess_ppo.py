@@ -45,6 +45,8 @@ class FullChessPPOConfig:
     max_grad_norm: float = 0.5
     history_length: int = 4
     max_plies: int = 300
+    reward_shaping_coefficient: float = 0.0
+    reward_shaping_scale: float = 600.0
     hidden_size: int = 64
     dropout: float = 0.0
     residual_blocks: int = 3
@@ -196,6 +198,8 @@ class FullChessTrainingCallback(BaseCallback):
         self.next_evaluation = 0
         self.next_checkpoint = 0
         self.rollout_game_rewards: list[float] = []
+        self.rollout_extrinsic_rewards: list[float] = []
+        self.rollout_shaping_rewards: list[float] = []
 
     def _on_training_start(self) -> None:
         self.next_evaluation = next_interval(
@@ -209,6 +213,8 @@ class FullChessTrainingCallback(BaseCallback):
 
     def _on_rollout_start(self) -> None:
         self.rollout_game_rewards = []
+        self.rollout_extrinsic_rewards = []
+        self.rollout_shaping_rewards = []
 
     def _on_rollout_end(self) -> None:
         if self.experiment_logger is None:
@@ -228,6 +234,16 @@ class FullChessTrainingCallback(BaseCallback):
             not math.isclose(reward, 0.0)
             for reward in self.rollout_game_rewards
         )
+        extrinsic_rewards = np.asarray(
+            self.rollout_extrinsic_rewards,
+            dtype=np.float64,
+        )
+        shaping_rewards = np.asarray(
+            self.rollout_shaping_rewards,
+            dtype=np.float64,
+        )
+        environment_training_rewards = extrinsic_rewards + shaping_rewards
+        extrinsic_signal_rate = nonzero_rate(extrinsic_rewards)
 
         self.experiment_logger.log_metrics(
             step=self.num_timesteps,
@@ -237,7 +253,16 @@ class FullChessTrainingCallback(BaseCallback):
                 "completed_games": completed_games,
                 "decisive_games": decisive_games,
                 "reward_signal_rate": (
-                    decisive_games / transitions if transitions else 0.0
+                    extrinsic_signal_rate
+                ),
+                "extrinsic_reward_signal_rate": extrinsic_signal_rate,
+                "shaping_reward_signal_rate": nonzero_rate(shaping_rewards),
+                "training_reward_signal_rate": nonzero_rate(
+                    environment_training_rewards
+                ),
+                "mean_abs_shaping_reward": mean_absolute(shaping_rewards),
+                "mean_abs_training_reward": mean_absolute(
+                    environment_training_rewards
                 ),
                 "return_std": float(np.std(returns)),
                 "value_prediction_std": float(np.std(values)),
@@ -246,6 +271,7 @@ class FullChessTrainingCallback(BaseCallback):
         )
 
     def _on_step(self) -> bool:
+        self._record_step_rewards()
         self._record_completed_training_games()
 
         if self.config.checkpoint_every > 0:
@@ -293,6 +319,18 @@ class FullChessTrainingCallback(BaseCallback):
 
         return True
 
+    def _record_step_rewards(self) -> None:
+        infos = self.locals.get("infos")
+        if infos is None:
+            return
+        for info in infos:
+            self.rollout_extrinsic_rewards.append(
+                float(info.get("extrinsic_reward", 0.0))
+            )
+            self.rollout_shaping_rewards.append(
+                float(info.get("shaping_reward", 0.0))
+            )
+
     def _record_completed_training_games(self) -> None:
         if self.experiment_logger is None:
             return
@@ -306,18 +344,25 @@ class FullChessTrainingCallback(BaseCallback):
                 continue
             self.training_episode += 1
             episode_info = info.get("episode", {})
-            reward = float(episode_info.get("r", 0.0))
-            self.rollout_game_rewards.append(reward)
+            training_reward = float(
+                info.get("episode_training_reward", episode_info.get("r", 0.0))
+            )
+            extrinsic_reward = float(info.get("episode_extrinsic_reward", 0.0))
+            shaping_reward = float(info.get("episode_shaping_reward", 0.0))
+            self.rollout_game_rewards.append(extrinsic_reward)
             self.experiment_logger.log_game(
                 step=self.num_timesteps,
                 phase="train",
                 episode=self.training_episode,
                 result=str(info.get("result", "*")),
-                reward=reward,
+                reward=extrinsic_reward,
                 plies=int(info.get("episode_plies", 0)),
                 agent_color=str(info.get("agent_color", "unknown")),
                 opponent=self.config.opponent,
                 termination=str(info.get("termination", "unknown")),
+                extrinsic_reward=extrinsic_reward,
+                shaping_reward=shaping_reward,
+                training_reward=training_reward,
             )
 
 
@@ -611,6 +656,9 @@ def make_single_env(
         ),
         history_length=config.history_length,
         max_plies=config.max_plies,
+        reward_shaping_coefficient=config.reward_shaping_coefficient,
+        reward_shaping_scale=config.reward_shaping_scale,
+        reward_shaping_gamma=config.gamma,
     )
     env.reset(seed=config.seed + rank)
     return BoardOnlyObservation(Monitor(env))
@@ -705,6 +753,18 @@ def next_interval(current_step: int, interval: int) -> int:
     return ((current_step // interval) + 1) * interval
 
 
+def nonzero_rate(values: np.ndarray) -> float:
+    if values.size == 0:
+        return 0.0
+    return float(np.count_nonzero(np.abs(values) > 1e-12) / values.size)
+
+
+def mean_absolute(values: np.ndarray) -> float:
+    if values.size == 0:
+        return 0.0
+    return float(np.mean(np.abs(values)))
+
+
 def validate_config(config: FullChessPPOConfig) -> None:
     if config.total_timesteps < 0:
         raise ValueError("total_timesteps must be non-negative")
@@ -734,6 +794,14 @@ def validate_config(config: FullChessPPOConfig) -> None:
         raise ValueError("PPO requires dropout=0 for stable probability ratios")
     if config.history_length < 0 or config.max_plies < 1:
         raise ValueError("invalid history_length or max_plies")
+    if not math.isfinite(config.reward_shaping_coefficient) or (
+        config.reward_shaping_coefficient < 0
+    ):
+        raise ValueError("reward_shaping_coefficient must be non-negative")
+    if not math.isfinite(config.reward_shaping_scale) or (
+        config.reward_shaping_scale <= 0
+    ):
+        raise ValueError("reward_shaping_scale must be positive")
     if config.evaluation_every < 0 or config.checkpoint_every < 0:
         raise ValueError("evaluation and checkpoint intervals must be non-negative")
     if config.evaluation_games < 0:
@@ -776,6 +844,18 @@ def main() -> None:
     parser.add_argument("--max-grad-norm", type=float, default=0.5)
     parser.add_argument("--history-length", type=int, default=4)
     parser.add_argument("--max-plies", type=int, default=300)
+    parser.add_argument(
+        "--reward-shaping-coefficient",
+        type=float,
+        default=0.0,
+        help="beta for potential-based static-evaluation reward shaping",
+    )
+    parser.add_argument(
+        "--reward-shaping-scale",
+        type=float,
+        default=600.0,
+        help="centipawn scale used to normalize the shaping potential",
+    )
     parser.add_argument("--hidden-size", type=int, default=64)
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--residual-blocks", type=int, default=3)
@@ -839,6 +919,8 @@ def main() -> None:
             max_grad_norm=args.max_grad_norm,
             history_length=args.history_length,
             max_plies=args.max_plies,
+            reward_shaping_coefficient=args.reward_shaping_coefficient,
+            reward_shaping_scale=args.reward_shaping_scale,
             hidden_size=args.hidden_size,
             dropout=args.dropout,
             residual_blocks=args.residual_blocks,

@@ -39,6 +39,9 @@ class GameRow:
     episode: int
     result: str
     reward: float
+    extrinsic_reward: float
+    shaping_reward: float
+    training_reward: float
     plies: int
     agent_color: str
     opponent: str
@@ -279,11 +282,29 @@ def build_text_report(data: ExperimentData) -> str:
         name: metric_values(data.metrics, phase="train_update", metric=name)
         for name in diagnostic_names
     }
+    explicit_shaping_metrics = bool(
+        metric_values(
+            data.metrics,
+            phase="rollout",
+            metric="extrinsic_reward_signal_rate",
+        )
+    )
+    reward_signal_names = (
+        (
+            "extrinsic_reward_signal_rate",
+            "shaping_reward_signal_rate",
+            "training_reward_signal_rate",
+            "mean_abs_shaping_reward",
+            "mean_abs_training_reward",
+        )
+        if explicit_shaping_metrics
+        else ("reward_signal_rate",)
+    )
     rollout_names = (
         "transitions",
         "completed_games",
         "decisive_games",
-        "reward_signal_rate",
+        *reward_signal_names,
         "return_std",
         "value_prediction_std",
         "advantage_std",
@@ -292,6 +313,14 @@ def build_text_report(data: ExperimentData) -> str:
         name: metric_values(data.metrics, phase="rollout", metric=name)
         for name in rollout_names
     }
+    shaping_coefficient = float(config.get("reward_shaping_coefficient", 0.0))
+    shaping_scale = float(config.get("reward_shaping_scale", 600.0))
+    shaping_line = (
+        f"Reward shaping:   beta={shaping_coefficient:g}, "
+        f"scale={shaping_scale:g} cp, gamma={config.get('gamma', '?')}"
+        if shaping_coefficient > 0
+        else "Reward shaping:   off"
+    )
 
     lines = [
         "Full-Chess PPO 실험 자동 보고서",
@@ -307,6 +336,7 @@ def build_text_report(data: ExperimentData) -> str:
         f"PPO update:      batch={config.get('batch_size', '?')}, epochs={config.get('n_epochs', '?')}",
         f"PPO limits:      clip={config.get('clip_range', '?')}, target_kl={config.get('target_kl', '?')}",
         f"게임 제한:       max_plies={config.get('max_plies', '?')}",
+        shaping_line,
         f"소요 시간:       {experiment_duration(data)}",
         *stage_lines,
         "",
@@ -324,6 +354,14 @@ def build_text_report(data: ExperimentData) -> str:
         f"점수율:          {train_stats.score_rate:.1%}",
         f"평균 game plies: {train_stats.average_plies:.1f}",
     ]
+    if train_games and shaping_coefficient > 0:
+        lines.extend(
+            [
+                f"평균 extrinsic reward: {mean(game.extrinsic_reward for game in train_games):.4f}",
+                f"평균 shaping reward:   {mean(game.shaping_reward for game in train_games):.4f}",
+                f"평균 training reward:  {mean(game.training_reward for game in train_games):.4f}",
+            ]
+        )
     for termination, count in train_stats.terminations:
         rate = count / train_stats.games if train_stats.games else 0.0
         lines.append(f"종료 {termination:20s} {count:5d} ({rate:5.1%})")
@@ -374,7 +412,12 @@ def build_text_report(data: ExperimentData) -> str:
         "transitions": "transition 수",
         "completed_games": "완결 대국 수",
         "decisive_games": "승패 대국 수",
-        "reward_signal_rate": "reward 신호 비율",
+        "reward_signal_rate": "기존 terminal 신호 비율",
+        "extrinsic_reward_signal_rate": "extrinsic 신호 비율",
+        "shaping_reward_signal_rate": "shaping 신호 비율",
+        "training_reward_signal_rate": "전체 학습 신호 비율",
+        "mean_abs_shaping_reward": "평균 |shaping reward|",
+        "mean_abs_training_reward": "평균 |training reward|",
         "return_std": "return 표준편차",
         "value_prediction_std": "value 예측 표준편차",
         "advantage_std": "advantage 표준편차",
@@ -385,7 +428,7 @@ def build_text_report(data: ExperimentData) -> str:
         if not values:
             continue
         has_rollout_metrics = True
-        if name == "reward_signal_rate":
+        if name.endswith("_signal_rate") or name == "reward_signal_rate":
             lines.append(
                 f"{rollout_labels[name]:20s} avg={mean(values):8.2%} "
                 f"min={min(values):8.2%} max={max(values):8.2%} "
@@ -662,11 +705,25 @@ def build_warnings(
         warnings.append(
             "rollout당 완결 대국이 평균 8판보다 적어 Critic target의 표본 변동이 클 수 있습니다."
         )
-    reward_signal_rate = rollout_diagnostics.get("reward_signal_rate", [])
+    reward_signal_rate = (
+        rollout_diagnostics.get("extrinsic_reward_signal_rate", [])
+        or rollout_diagnostics.get("reward_signal_rate", [])
+    )
+    training_reward_signal_rate = rollout_diagnostics.get(
+        "training_reward_signal_rate",
+        [],
+    )
+    shaping_coefficient = float(data.config.get("reward_shaping_coefficient", 0.0))
     if reward_signal_rate and mean(reward_signal_rate) < 0.01:
-        warnings.append(
-            "reward가 0이 아닌 transition이 평균 1%보다 적어 학습 신호가 매우 희소합니다."
-        )
+        if shaping_coefficient > 0 and training_reward_signal_rate:
+            if mean(training_reward_signal_rate) < 0.1:
+                warnings.append(
+                    "reward shaping을 켰지만 reward가 0이 아닌 transition이 평균 10%보다 적습니다."
+                )
+        else:
+            warnings.append(
+                "reward가 0이 아닌 transition이 평균 1%보다 적어 학습 신호가 매우 희소합니다."
+            )
 
     illegal_actions = sum(
         1
@@ -866,12 +923,29 @@ def plot_learning_curves(data: ExperimentData, output_path: str | Path) -> Path:
             phase="rollout",
         )
         reward_rate_axis = rollout_game_axis.twinx()
+        extrinsic_metric = (
+            "extrinsic_reward_signal_rate"
+            if metric_values(
+                data.metrics,
+                phase="rollout",
+                metric="extrinsic_reward_signal_rate",
+            )
+            else "reward_signal_rate"
+        )
         plot_metric(
             reward_rate_axis,
             data.metrics,
-            "reward_signal_rate",
-            label="Reward signal rate",
+            extrinsic_metric,
+            label="Extrinsic signal rate",
             color="#d62728",
+            phase="rollout",
+        )
+        plot_metric(
+            reward_rate_axis,
+            data.metrics,
+            "training_reward_signal_rate",
+            label="Training signal rate",
+            color="#9467bd",
             phase="rollout",
         )
         rollout_game_axis.set_title("Rollout game and reward signals")
@@ -1134,22 +1208,40 @@ def read_metrics(path: Path) -> tuple[MetricRow, ...]:
 
 def read_games(path: Path) -> tuple[GameRow, ...]:
     with path.open(encoding="utf-8", newline="") as source:
-        return tuple(
-            GameRow(
-                timestamp=row["timestamp"],
-                step=int(row["step"]),
-                phase=row["phase"],
-                episode=int(row["episode"]),
-                result=row["result"],
-                reward=float(row["reward"]),
-                plies=int(row["plies"]),
-                agent_color=row["agent_color"],
-                opponent=row["opponent"],
-                termination=row["termination"],
-                checkpoint=row["checkpoint"],
+        games = []
+        for row in csv.DictReader(source):
+            reward = float(row["reward"])
+            extrinsic_reward = optional_float(row, "extrinsic_reward", reward)
+            shaping_reward = optional_float(row, "shaping_reward", 0.0)
+            training_reward = optional_float(
+                row,
+                "training_reward",
+                extrinsic_reward + shaping_reward,
             )
-            for row in csv.DictReader(source)
-        )
+            games.append(
+                GameRow(
+                    timestamp=row["timestamp"],
+                    step=int(row["step"]),
+                    phase=row["phase"],
+                    episode=int(row["episode"]),
+                    result=row["result"],
+                    reward=reward,
+                    extrinsic_reward=extrinsic_reward,
+                    shaping_reward=shaping_reward,
+                    training_reward=training_reward,
+                    plies=int(row["plies"]),
+                    agent_color=row["agent_color"],
+                    opponent=row["opponent"],
+                    termination=row["termination"],
+                    checkpoint=row["checkpoint"],
+                )
+            )
+        return tuple(games)
+
+
+def optional_float(row: dict[str, str], key: str, default: float) -> float:
+    value = row.get(key, "")
+    return float(value) if value not in (None, "") else float(default)
 
 
 def read_json(path: Path) -> dict[str, Any]:

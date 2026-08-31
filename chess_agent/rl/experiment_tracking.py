@@ -15,6 +15,9 @@ GAME_FIELDS = (
     "episode",
     "result",
     "reward",
+    "extrinsic_reward",
+    "shaping_reward",
+    "training_reward",
     "plies",
     "agent_color",
     "opponent",
@@ -105,7 +108,18 @@ class ExperimentLogger:
         opponent: str,
         termination: str,
         checkpoint: str | Path | None = None,
+        extrinsic_reward: float | None = None,
+        shaping_reward: float = 0.0,
+        training_reward: float | None = None,
     ) -> None:
+        resolved_extrinsic_reward = (
+            float(reward) if extrinsic_reward is None else float(extrinsic_reward)
+        )
+        resolved_training_reward = (
+            resolved_extrinsic_reward + float(shaping_reward)
+            if training_reward is None
+            else float(training_reward)
+        )
         append_csv_rows(
             self.games_path,
             GAME_FIELDS,
@@ -117,6 +131,9 @@ class ExperimentLogger:
                     "episode": int(episode),
                     "result": result,
                     "reward": float(reward),
+                    "extrinsic_reward": resolved_extrinsic_reward,
+                    "shaping_reward": float(shaping_reward),
+                    "training_reward": resolved_training_reward,
                     "plies": int(plies),
                     "agent_color": agent_color,
                     "opponent": opponent,

@@ -30,6 +30,8 @@ def test_experiment_logger_records_config_metrics_games_and_summary(
         agent_color="white",
         opponent="random",
         termination="checkmate",
+        shaping_reward=0.1,
+        training_reward=1.1,
     )
     logger.log_checkpoint(step=10, path="tmp/model.pt", is_best=True)
     logger.save_summary({"episodes": 1, "win_rate": 0.25})
@@ -48,6 +50,9 @@ def test_experiment_logger_records_config_metrics_games_and_summary(
     assert game_rows[0]["result"] == "1-0"
     assert game_rows[0]["plies"] == "63"
     assert game_rows[0]["phase"] == "evaluation"
+    assert game_rows[0]["extrinsic_reward"] == "1.0"
+    assert game_rows[0]["shaping_reward"] == "0.1"
+    assert game_rows[0]["training_reward"] == "1.1"
 
     events = [
         json.loads(line)
