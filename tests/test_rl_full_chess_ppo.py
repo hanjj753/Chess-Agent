@@ -284,6 +284,11 @@ def test_full_chess_ppo_rejects_dropout() -> None:
         validate_config(smoke_config(dropout=0.1))
 
 
+def test_full_chess_ppo_rejects_legacy_max_plies_mode() -> None:
+    with pytest.raises(ValueError, match="max_plies_mode"):
+        validate_config(smoke_config(max_plies_mode="legacy_truncation"))
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     (

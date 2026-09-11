@@ -17,6 +17,9 @@ from chess_agent.rl.observations import (
 )
 
 
+MAX_PLIES_MODE = "terminal_draw"
+
+
 class FullChessEnv(gym.Env):
     """A full-game environment where one step contains agent and opponent moves."""
 
@@ -147,7 +150,7 @@ class FullChessEnv(gym.Env):
             self.done = True
             reward, reward_info = self._compose_reward(
                 self.illegal_action_reward,
-                true_terminal=True,
+                terminal_for_learning=True,
             )
             return (
                 self._observation(),
@@ -165,7 +168,7 @@ class FullChessEnv(gym.Env):
             self.done = True
             reward, reward_info = self._compose_reward(
                 self.illegal_action_reward,
-                true_terminal=True,
+                terminal_for_learning=True,
             )
             return (
                 self._observation(),
@@ -190,7 +193,7 @@ class FullChessEnv(gym.Env):
                 move_san=move_san,
             )
         if self.episode_plies >= self.max_plies:
-            return self._truncate(move_uci=move.uci(), move_san=move_san)
+            return self._finish_max_plies(move_uci=move.uci(), move_san=move_san)
 
         opponent_move = self._play_opponent_move()
         outcome = board.outcome(claim_draw=True)
@@ -202,13 +205,16 @@ class FullChessEnv(gym.Env):
                 opponent_move_uci=opponent_move,
             )
         if self.episode_plies >= self.max_plies:
-            return self._truncate(
+            return self._finish_max_plies(
                 move_uci=move.uci(),
                 move_san=move_san,
                 opponent_move_uci=opponent_move,
             )
 
-        reward, reward_info = self._compose_reward(0.0, true_terminal=False)
+        reward, reward_info = self._compose_reward(
+            0.0,
+            terminal_for_learning=False,
+        )
         return (
             self._observation(),
             reward,
@@ -282,7 +288,7 @@ class FullChessEnv(gym.Env):
         self.done = True
         reward, reward_info = self._compose_reward(
             self._outcome_reward(outcome),
-            true_terminal=True,
+            terminal_for_learning=True,
         )
         return (
             self._observation(),
@@ -298,20 +304,21 @@ class FullChessEnv(gym.Env):
             ),
         )
 
-    def _truncate(
+    def _finish_max_plies(
         self,
         **extra: Any,
     ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
+        """Adjudicate the finite-horizon game as a terminal draw."""
         self.done = True
         reward, reward_info = self._compose_reward(
             self.draw_reward,
-            true_terminal=False,
+            terminal_for_learning=True,
         )
         return (
             self._observation(),
             reward,
-            False,
             True,
+            False,
             self._info(
                 illegal_action=False,
                 result="1/2-1/2",
@@ -332,11 +339,11 @@ class FullChessEnv(gym.Env):
         self,
         extrinsic_reward: float,
         *,
-        true_terminal: bool,
+        terminal_for_learning: bool,
     ) -> tuple[float, dict[str, float]]:
         previous_potential = self._position_potential
         next_potential = (
-            0.0 if true_terminal else self._current_position_potential()
+            0.0 if terminal_for_learning else self._current_position_potential()
         )
         shaping_reward = self.reward_shaping_coefficient * (
             self.reward_shaping_gamma * next_potential - previous_potential

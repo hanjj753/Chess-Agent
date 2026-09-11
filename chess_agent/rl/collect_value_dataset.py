@@ -7,7 +7,11 @@ import chess
 import numpy as np
 import torch
 
-from chess_agent.rl.full_chess_env import BoardOnlyObservation, FullChessEnv
+from chess_agent.rl.full_chess_env import (
+    MAX_PLIES_MODE,
+    BoardOnlyObservation,
+    FullChessEnv,
+)
 from chess_agent.rl.observations import OBSERVATION_CHANNELS
 from chess_agent.rl.policy_value import PolicyValueNetwork, load_policy_value
 from chess_agent.rl.train_full_chess_ppo import make_opponent
@@ -215,6 +219,7 @@ def collect_value_dataset(
         "opponent_depth": opponent_depth,
         "opponent_time_limit": opponent_time_limit,
         "max_plies": max_plies,
+        "max_plies_mode": MAX_PLIES_MODE,
         "gamma": gamma,
         "deterministic_policy": deterministic_policy,
         "temperature": temperature,

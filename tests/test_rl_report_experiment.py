@@ -27,6 +27,7 @@ def test_generate_experiment_report_from_one_experiment(
             "n_epochs": 2,
             "target_kl": 0.03,
             "max_plies": 100,
+            "max_plies_mode": "terminal_draw",
         },
     )
     logger.log_metrics(
@@ -113,6 +114,7 @@ def test_generate_experiment_report_from_one_experiment(
     assert "rollout당 완결 대국이 평균 8판보다 적어" in report
     assert "reward가 0이 아닌 transition이 평균 1%보다 적어" in report
     assert "alpha_move_probability=25.0%" in report
+    assert "mode=terminal draw (no bootstrap)" in report
 
     assert generate_experiment_reports(logger.run_dir) == ()
     result.game_outcomes_path.unlink()

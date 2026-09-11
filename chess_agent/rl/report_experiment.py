@@ -315,6 +315,12 @@ def build_text_report(data: ExperimentData) -> str:
     }
     shaping_coefficient = float(config.get("reward_shaping_coefficient", 0.0))
     shaping_scale = float(config.get("reward_shaping_scale", 600.0))
+    max_plies_mode = str(config.get("max_plies_mode", "legacy_truncation"))
+    max_plies_mode_label = (
+        "terminal draw (no bootstrap)"
+        if max_plies_mode == "terminal_draw"
+        else max_plies_mode
+    )
     shaping_line = (
         f"Reward shaping:   beta={shaping_coefficient:g}, "
         f"scale={shaping_scale:g} cp, gamma={config.get('gamma', '?')}"
@@ -335,7 +341,7 @@ def build_text_report(data: ExperimentData) -> str:
         f"rollout:         n_envs={config.get('n_envs', '?')} x n_steps={config.get('n_steps', '?')}",
         f"PPO update:      batch={config.get('batch_size', '?')}, epochs={config.get('n_epochs', '?')}",
         f"PPO limits:      clip={config.get('clip_range', '?')}, target_kl={config.get('target_kl', '?')}",
-        f"게임 제한:       max_plies={config.get('max_plies', '?')}",
+        f"게임 제한:       max_plies={config.get('max_plies', '?')}, mode={max_plies_mode_label}",
         shaping_line,
         f"소요 시간:       {experiment_duration(data)}",
         *stage_lines,

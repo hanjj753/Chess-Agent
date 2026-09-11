@@ -16,7 +16,11 @@ from chess_agent.agents.alpha_random_agent import AlphaRandomAgent
 from chess_agent.agents.base import Agent
 from chess_agent.agents.random_agent import RandomAgent
 from chess_agent.rl.experiment_tracking import ExperimentLogger
-from chess_agent.rl.full_chess_env import BoardOnlyObservation, FullChessEnv
+from chess_agent.rl.full_chess_env import (
+    MAX_PLIES_MODE,
+    BoardOnlyObservation,
+    FullChessEnv,
+)
 from chess_agent.rl.policy_value import PolicyValueNetwork, load_policy_value
 from chess_agent.rl.ppo_policy import (
     ChessMaskableActorCriticPolicy,
@@ -45,6 +49,7 @@ class FullChessPPOConfig:
     max_grad_norm: float = 0.5
     history_length: int = 4
     max_plies: int = 300
+    max_plies_mode: str = MAX_PLIES_MODE
     reward_shaping_coefficient: float = 0.0
     reward_shaping_scale: float = 600.0
     hidden_size: int = 64
@@ -794,6 +799,8 @@ def validate_config(config: FullChessPPOConfig) -> None:
         raise ValueError("PPO requires dropout=0 for stable probability ratios")
     if config.history_length < 0 or config.max_plies < 1:
         raise ValueError("invalid history_length or max_plies")
+    if config.max_plies_mode != MAX_PLIES_MODE:
+        raise ValueError(f"max_plies_mode must be {MAX_PLIES_MODE!r}")
     if not math.isfinite(config.reward_shaping_coefficient) or (
         config.reward_shaping_coefficient < 0
     ):

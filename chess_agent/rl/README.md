@@ -58,8 +58,9 @@ Gymnasium 환경
 
 채널 순서는 `현재 위치 -> 한 ply 전 -> 두 ply 전 -> ...`이며, 게임 초반에
 history가 부족한 부분은 0으로 채웁니다. 환경은 체크메이트와 python-chess의
-무승부 판정을 terminal로 처리하고, `max_plies`에 도달하면 truncate합니다.
-보상은 agent 관점에서 승리 `+1`, 무승부 `0`, 패배 `-1`입니다.
+무승부 판정을 terminal로 처리합니다. `max_plies`에 도달한 대국도 이 실험에서는
+무승부로 확정하고 `terminated=True`로 끝냅니다. 따라서 PPO가 제한 수 이후의 value를
+bootstrap하지 않습니다. 보상은 agent 관점에서 승리 `+1`, 무승부 `0`, 패배 `-1`입니다.
 
 현재 PPO 학습은 고정된 random 또는 tree agent를 상대로 진행합니다. 두 학습 agent가
 서로 갱신되는 self-play는 아직 연결하지 않았습니다.
@@ -67,7 +68,7 @@ history가 부족한 부분은 0으로 채웁니다. 환경은 체크메이트�
 ### 학습 단위
 
 현재 `FullChessEnv`에서는 **episode 1개가 체스 대국 1판**입니다. RL에서 episode는
-`reset()`부터 terminal 또는 truncate까지의 한 trajectory를 뜻하며, 이 환경에서는
+`reset()`부터 terminal까지의 한 trajectory를 뜻하며, 이 환경에서는
 그 시작과 끝이 대국의 시작과 끝에 정확히 대응합니다.
 
 - `ply`: 백 또는 흑이 둔 수 하나
@@ -381,24 +382,37 @@ Phi(state) = tanh(agent 관점 평가 점수 / scale)
 r_training = r_extrinsic + r_shaping
 ```
 
-`r_extrinsic`은 기존 승리 `+1`, 무승부 `0`, 패배 `-1`입니다. 진짜 게임 종료 상태의
-`Phi`는 0으로 두며, `max_plies` truncation에서는 마지막 상태의 `Phi`를 유지합니다.
-`beta=0`이 기본값이므로 옵션을 생략하면 이전 학습과 완전히 같은 reward를 사용합니다.
+`r_extrinsic`은 기존 승리 `+1`, 무승부 `0`, 패배 `-1`입니다. 체크메이트, 규칙상
+무승부, `max_plies` 무승부를 포함한 모든 학습 종료 상태의 `Phi`는 0으로 둡니다.
+`beta=0`이 기본값이므로 옵션을 생략하면 shaping reward는 사용하지 않습니다.
 
-p25에서 shaping 효과만 비교하는 첫 실험은 발전이 확인되지 않은 p25 final 대신
-p25 시작 checkpoint에서 다시 출발합니다.
+이전 구현은 `max_plies`를 truncation으로 반환하고 마지막 `Phi`를 유지했습니다.
+`beta=0.05` 실험에서 reward 신호는 촘촘해졌지만, p25 평가 점수율이 67.7%에서
+63.3%로 낮아지고 승리가 제한 수 무승부로 바뀌는 경향이 나타났습니다. 현재 구현은
+`max_plies`를 terminal draw로 확정해 이 불일치를 제거합니다. 새 실험의 `config.json`에는
+`max_plies_mode=terminal_draw`가 기록됩니다.
+
+다음 A/B는 발전이 확인되지 않은 p25 final 대신 동일한 p25 시작 checkpoint에서
+출발합니다. 먼저 seed 0으로 `beta=0` 기준선과 작은 `beta=0.01`을 비교합니다.
 
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp\full_chess_ppo_alpha_p25_initial.zip --additional-timesteps 16384 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --reward-shaping-coefficient 0.05 --reward-shaping-scale 600 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 --seed 0 --device cuda --initial-model-path tmp\full_chess_ppo_alpha_p25_shaping_initial.zip --save-path tmp\full_chess_ppo_alpha_p25_shaping_final.zip --best-model-path tmp\full_chess_ppo_alpha_p25_shaping_best.zip --checkpoint-dir tmp\full_chess_ppo_alpha_p25_shaping_checkpoints --experiment-dir analysis\experiments --experiment-name ppo_alpha_p25_shaping_beta005
+.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp\full_chess_ppo_alpha_p25_initial.zip --additional-timesteps 16384 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --reward-shaping-coefficient 0 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 --seed 0 --device cuda --initial-model-path tmp\full_chess_ppo_alpha_p25_terminal_beta0_seed0_initial.zip --save-path tmp\full_chess_ppo_alpha_p25_terminal_beta0_seed0_final.zip --best-model-path tmp\full_chess_ppo_alpha_p25_terminal_beta0_seed0_best.zip --checkpoint-dir tmp\full_chess_ppo_alpha_p25_terminal_beta0_seed0_checkpoints --experiment-dir analysis\experiments --experiment-name ppo_alpha_p25_terminal_beta0_seed0
+.\.venv\Scripts\python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp\full_chess_ppo_alpha_p25_initial.zip --additional-timesteps 16384 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --reward-shaping-coefficient 0.01 --reward-shaping-scale 600 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 --seed 0 --device cuda --initial-model-path tmp\full_chess_ppo_alpha_p25_terminal_beta001_seed0_initial.zip --save-path tmp\full_chess_ppo_alpha_p25_terminal_beta001_seed0_final.zip --best-model-path tmp\full_chess_ppo_alpha_p25_terminal_beta001_seed0_best.zip --checkpoint-dir tmp\full_chess_ppo_alpha_p25_terminal_beta001_seed0_checkpoints --experiment-dir analysis\experiments --experiment-name ppo_alpha_p25_terminal_beta001_seed0
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_alpha_p25_initial.zip --additional-timesteps 16384 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --reward-shaping-coefficient 0.05 --reward-shaping-scale 600 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 --seed 0 --device cuda --initial-model-path tmp/full_chess_ppo_alpha_p25_shaping_initial.zip --save-path tmp/full_chess_ppo_alpha_p25_shaping_final.zip --best-model-path tmp/full_chess_ppo_alpha_p25_shaping_best.zip --checkpoint-dir tmp/full_chess_ppo_alpha_p25_shaping_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_alpha_p25_shaping_beta005
+python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_alpha_p25_initial.zip --additional-timesteps 16384 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --reward-shaping-coefficient 0 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 --seed 0 --device cuda --initial-model-path tmp/full_chess_ppo_alpha_p25_terminal_beta0_seed0_initial.zip --save-path tmp/full_chess_ppo_alpha_p25_terminal_beta0_seed0_final.zip --best-model-path tmp/full_chess_ppo_alpha_p25_terminal_beta0_seed0_best.zip --checkpoint-dir tmp/full_chess_ppo_alpha_p25_terminal_beta0_seed0_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_alpha_p25_terminal_beta0_seed0
+python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_alpha_p25_initial.zip --additional-timesteps 16384 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --reward-shaping-coefficient 0.01 --reward-shaping-scale 600 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 --seed 0 --device cuda --initial-model-path tmp/full_chess_ppo_alpha_p25_terminal_beta001_seed0_initial.zip --save-path tmp/full_chess_ppo_alpha_p25_terminal_beta001_seed0_final.zip --best-model-path tmp/full_chess_ppo_alpha_p25_terminal_beta001_seed0_best.zip --checkpoint-dir tmp/full_chess_ppo_alpha_p25_terminal_beta001_seed0_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_alpha_p25_terminal_beta001_seed0
 ```
+
+두 실험은 시작 checkpoint, 학습량, 상대, 평가 seed가 같고 reward shaping coefficient만
+다릅니다. 먼저 각 실험의 시작/최종 평가와 max_plies 비율을 확인합니다. `beta=0.01`이
+명확히 나을 때만 seed 1과 2로 반복하며, 이때 `--seed`와 모든 출력 이름의 `seed0`을 함께
+바꿔 기존 결과를 덮어쓰지 않습니다.
 
 best checkpoint 선택용 평가는 shaping을 사용하지 않고 실제 승·무·패만 사용합니다.
 `games.csv`의 `reward`와 `extrinsic_reward`도 실제 대국 결과를 유지하고,

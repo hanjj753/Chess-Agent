@@ -205,7 +205,7 @@ def test_full_chess_env_rewards_agent_checkmate() -> None:
     assert observation["action_mask"].sum() == 0
 
 
-def test_full_chess_env_truncates_at_max_plies() -> None:
+def test_full_chess_env_adjudicates_max_plies_as_terminal_draw() -> None:
     env = FullChessEnv(
         opponent=SequenceAgent(["e7e5"]),
         agent_color=chess.WHITE,
@@ -218,10 +218,39 @@ def test_full_chess_env_truncates_at_max_plies() -> None:
     )
 
     assert reward == 0.0
-    assert not terminated
-    assert truncated
+    assert terminated
+    assert not truncated
+    assert info["result"] == "1/2-1/2"
     assert info["termination"] == "max_plies"
     assert info["episode_plies"] == 1
+
+
+def test_max_plies_terminal_draw_uses_zero_next_potential() -> None:
+    coefficient = 0.05
+    env = FullChessEnv(
+        initial_fen="7k/8/8/8/8/8/6Q1/6K1 w - - 0 1",
+        agent_color=chess.WHITE,
+        max_plies=1,
+        reward_shaping_coefficient=coefficient,
+    )
+    _, reset_info = env.reset()
+    previous_potential = float(reset_info["position_potential"])
+
+    _, reward, terminated, truncated, info = env.step(
+        move_to_action(chess.Move.from_uci("g2g3"))
+    )
+
+    expected_shaping = -coefficient * previous_potential
+    assert previous_potential > 0.0
+    assert terminated
+    assert not truncated
+    assert info["result"] == "1/2-1/2"
+    assert info["termination"] == "max_plies"
+    assert info["position_potential"] == 0.0
+    assert info["extrinsic_reward"] == 0.0
+    assert info["shaping_reward"] == pytest.approx(expected_shaping)
+    assert info["episode_shaping_reward"] == pytest.approx(expected_shaping)
+    assert reward == pytest.approx(expected_shaping)
 
 
 def test_full_chess_env_terminates_on_illegal_action() -> None:

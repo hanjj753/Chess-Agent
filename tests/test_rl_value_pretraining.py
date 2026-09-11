@@ -91,6 +91,8 @@ def test_collect_value_dataset_splits_whole_games(tmp_path: Path) -> None:
     assert len(train) + len(validation) == 4
     assert not set(train.game_ids) & set(validation.game_ids)
     assert train.observation_shape == (18, 8, 8)
+    assert train.metadata["max_plies_mode"] == "terminal_draw"
+    assert validation.metadata["max_plies_mode"] == "terminal_draw"
 
 
 def test_value_pretraining_changes_only_value_head(tmp_path: Path) -> None:
