@@ -396,6 +396,16 @@ def train_full_chess_ppo(
                 env=train_env,
                 device=config.device,
             )
+            checkpoint_seed = model.seed
+            # SB3 restores the seed saved in the checkpoint. A resumed stage must
+            # instead use its explicitly configured seed for RNGs and env resets.
+            model.seed = config.seed
+            model.set_random_seed(config.seed)
+            print(
+                f"Resume seed: checkpoint={checkpoint_seed} "
+                f"stage={config.seed}",
+                flush=True,
+            )
             model.target_kl = config.target_kl
         else:
             if config.pretrained_policy_value_path is not None:

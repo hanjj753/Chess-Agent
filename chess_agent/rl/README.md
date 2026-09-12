@@ -414,6 +414,82 @@ python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_a
 명확히 나을 때만 seed 1과 2로 반복하며, 이때 `--seed`와 모든 출력 이름의 `seed0`을 함께
 바꿔 기존 결과를 덮어쓰지 않습니다.
 
+#### Terminal Draw A/B 독립 평가
+
+seed 0 학습에서는 `beta=0.01`의 첫 4,096 timestep checkpoint만 시작 모델을 넘었습니다.
+학습 중 checkpoint 선택에 사용하지 않은 `seed=60000`의 1,000판으로 시작 모델,
+같은 step의 `beta=0`, `beta=0.01` best를 paired 비교합니다.
+
+Linux:
+
+```bash
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_initial.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 60000 --device cuda --output-path analysis/ppo_p25_terminalfix_initial_seed60000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta0_seed0_checkpoints/full_chess_ppo_28672.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 60000 --device cuda --output-path analysis/ppo_p25_terminalfix_beta0_step28672_seed60000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_best.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 60000 --device cuda --output-path analysis/ppo_p25_terminalfix_beta001_best_seed60000_1000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_initial_seed60000_1000_games.csv analysis/ppo_p25_terminalfix_beta0_step28672_seed60000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_initial_vs_beta0_step28672_seed60000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_initial_seed60000_1000_games.csv analysis/ppo_p25_terminalfix_beta001_best_seed60000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_initial_vs_beta001_best_seed60000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_beta0_step28672_seed60000_1000_games.csv analysis/ppo_p25_terminalfix_beta001_best_seed60000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_beta0_vs_beta001_step28672_seed60000.txt
+```
+
+`beta=0.01`이 시작 모델과 같은 step의 `beta=0`보다 모두 높고, checkmate는 늘면서
+`max_plies`가 늘지 않는지 확인합니다. 이 독립 평가에서도 우세할 때만 seed 1과 2의
+4,096 timestep 반복 학습으로 넘어갑니다.
+
+#### Terminal Draw 다중 학습 seed 검증
+
+seed 0의 독립 1,000판에서는 시작 모델 65.1%, `beta=0` 63.9%, `beta=0.01` 65.8%를
+기록했습니다. `beta=0.01`은 같은 step의 `beta=0`보다 +1.90%p 높았고 95% 신뢰구간도
+`[+0.44, +3.36]`%p였지만, 시작 모델 대비 +0.70%p 차이는 통계적으로 확실하지
+않았습니다. 따라서 hyperparameter를 더 바꾸기 전에 학습 seed 1과 2에서 이 결과가
+반복되는지 확인합니다.
+
+처음 실행한 seed 1과 2 실험은 resume checkpoint에 저장된 seed 0이 복원되어, 같은
+beta의 학습 대국과 PPO update가 seed 0까지 모두 동일했습니다. 현재 코드는 resume 직후
+checkpoint seed를 새 `--seed`로 덮어쓰고 Python, NumPy, PyTorch 및 vector environment를
+다시 seed합니다. 실행 초기에 `Resume seed: checkpoint=0 stage=1`처럼 출력되는지
+확인합니다. 아래 `seedfix` 이름은 잘못된 기존 결과를 보존하면서 새 결과를 구분합니다.
+
+각 seed에서 `beta=0`과 `beta=0.01`을 동일한 시작 모델로부터 4,096 timestep만
+학습합니다. 첫 4,096 timestep 이후 성능이 하락했던 seed 0 결과를 반영한 길이입니다.
+
+Linux:
+
+```bash
+python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_alpha_p25_initial.zip --additional-timesteps 4096 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --reward-shaping-coefficient 0 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 --seed 1 --device cuda --initial-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta0_seed1_initial.zip --save-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta0_seed1_final.zip --best-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta0_seed1_best.zip --checkpoint-dir tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta0_seed1_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_alpha_p25_terminalfix_seedfix_beta0_seed1
+python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_alpha_p25_initial.zip --additional-timesteps 4096 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --reward-shaping-coefficient 0.01 --reward-shaping-scale 600 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 --seed 1 --device cuda --initial-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed1_initial.zip --save-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed1_final.zip --best-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed1_best.zip --checkpoint-dir tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed1_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_alpha_p25_terminalfix_seedfix_beta001_seed1
+python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_alpha_p25_initial.zip --additional-timesteps 4096 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --reward-shaping-coefficient 0 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 --seed 2 --device cuda --initial-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta0_seed2_initial.zip --save-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta0_seed2_final.zip --best-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta0_seed2_best.zip --checkpoint-dir tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta0_seed2_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_alpha_p25_terminalfix_seedfix_beta0_seed2
+python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_alpha_p25_initial.zip --additional-timesteps 4096 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --reward-shaping-coefficient 0.01 --reward-shaping-scale 600 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 --seed 2 --device cuda --initial-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed2_initial.zip --save-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed2_final.zip --best-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed2_best.zip --checkpoint-dir tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed2_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_alpha_p25_terminalfix_seedfix_beta001_seed2
+python -m chess_agent.rl.report_experiment analysis/experiments
+```
+
+학습 중 300판 평가는 checkpoint 선택용 진단일 뿐입니다. 네 학습이 끝나면 선택 편향을
+피하기 위해 `best`가 아니라 정확히 같은 4,096 timestep을 학습한 `final` 모델들을,
+학습과 checkpoint 선택에 사용하지 않은 같은 대국 seed 80,000에서 평가합니다.
+
+```bash
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_initial.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_p25_terminalfix_seedfix_initial_seed80000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta0_seed1_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_p25_terminalfix_seedfix_beta0_seed1_final_seed80000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed1_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_p25_terminalfix_seedfix_beta001_seed1_final_seed80000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta0_seed2_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_p25_terminalfix_seedfix_beta0_seed2_final_seed80000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed2_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_p25_terminalfix_seedfix_beta001_seed2_final_seed80000_1000.txt
+```
+
+같은 대국끼리 paired 비교합니다.
+
+```bash
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta0_seed1_final_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_initial_vs_beta0_seed1_seed80000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta001_seed1_final_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_initial_vs_beta001_seed1_seed80000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_beta0_seed1_final_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta001_seed1_final_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_beta0_vs_beta001_seed1_seed80000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta0_seed2_final_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_initial_vs_beta0_seed2_seed80000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta001_seed2_final_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_initial_vs_beta001_seed2_seed80000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_beta0_seed2_final_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta001_seed2_final_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_beta0_vs_beta001_seed2_seed80000.txt
+```
+
+두 seed 모두에서 `beta=0.01`이 `beta=0`보다 높고, 평균적으로 시작 모델도 넘으며,
+checkmate가 증가하고 `max_plies`가 증가하지 않으면 `beta=0.01`을 채택합니다. 한 seed에서만
+좋거나 신뢰구간이 계속 0을 포함하면 shaping 효과가 불안정하므로 beta를 더 조정하지 않고
+학습 상대와 value potential을 먼저 다시 살펴봅니다.
+
 best checkpoint 선택용 평가는 shaping을 사용하지 않고 실제 승·무·패만 사용합니다.
 `games.csv`의 `reward`와 `extrinsic_reward`도 실제 대국 결과를 유지하고,
 `shaping_reward`, `training_reward`에 학습용 reward를 별도로 기록합니다. 자동 보고서의
