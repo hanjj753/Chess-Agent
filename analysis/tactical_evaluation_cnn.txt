@@ -1,0 +1,153 @@
+Tactical puzzle evaluation
+Agent:          policy
+Episodes:       20190
+Successes:      10879
+Success rate:   53.9%
+Move accuracy:  58.1%
+Illegal moves:  0
+Average reward: 0.078
+
+Rating breakdown
+Group      Episodes   Success  Move acc  Avg reward
+800-999        3461     85.4%     87.7%       0.708
+1000-1199      4299     72.1%     76.4%       0.442
+1200-1399      3346     59.1%     64.9%       0.181
+1400-1599      3008     44.4%     51.4%      -0.112
+1600-1799      2568     34.8%     42.3%      -0.305
+1800-1999      2036     21.4%     32.2%      -0.572
+2000-2199      1469     12.3%     22.8%      -0.754
+2200-2399         3     33.3%     30.0%      -0.333
+
+Agent move-count breakdown
+Group  Episodes   Success  Move acc  Avg reward
+2         13188     62.7%     67.3%       0.253
+3          6043     39.7%     49.4%      -0.206
+4           959     22.6%     35.5%      -0.547
+
+Theme breakdown (multi-label, min episodes=20)
+Group              Episodes   Success  Move acc  Avg reward
+quietMove               170      5.3%     13.4%      -0.894
+defensiveMove           280     12.9%     33.3%      -0.743
+veryLong                959     22.6%     35.5%      -0.547
+pawnEndgame              45     24.4%     36.6%      -0.511
+swallowstailMate         23     26.1%     40.4%      -0.478
+trappedPiece            512     27.1%     30.3%      -0.457
+triangleMate             43     27.9%     45.2%      -0.442
+discoveredCheck         706     32.3%     41.2%      -0.354
+enPassant                21     33.3%     43.6%      -0.333
+clearance               510     33.5%     42.8%      -0.329
+exposedKing             836     33.9%     43.4%      -0.323
+knightEndgame            47     34.0%     42.9%      -0.319
+capturingDefender       127     36.2%     41.9%      -0.276
+interference             77     36.4%     42.3%      -0.273
+collinearMove            35     37.1%     37.1%      -0.257
+bishopEndgame           113     37.2%     39.4%      -0.257
+advancedPawn            746     39.0%     44.3%      -0.220
+long                   6042     39.7%     49.4%      -0.206
+intermezzo              533     39.8%     47.6%      -0.205
+morphysMate              45     40.0%     52.0%      -0.200
+killBoxMate              26     42.3%     46.6%      -0.154
+pin                    2456     43.4%     48.3%      -0.131
+attraction             1541     43.7%     50.2%      -0.125
+promotion               320     44.1%     48.8%      -0.119
+advantage              6162     45.4%     50.6%      -0.092
+deflection             1930     46.1%     51.4%      -0.079
+blindSwineMate           26     46.2%     51.6%      -0.077
+discoveredAttack       2273     47.4%     52.2%      -0.052
+queenEndgame            155     47.7%     53.7%      -0.045
+doubleCheck             171     48.5%     57.4%      -0.029
+epauletteMate            98     49.0%     56.2%      -0.020
+mateIn4                 158     49.4%     55.1%      -0.013
+crushing               6834     49.4%     53.8%      -0.011
+sacrifice              2994     49.5%     53.6%      -0.011
+middlegame             9510     50.3%     55.2%       0.006
+masterVsMaster          204     50.5%     56.9%       0.010
+queensideAttack         399     50.6%     55.2%       0.013
+master                 2287     51.7%     55.5%       0.034
+skewer                  938     53.8%     56.9%       0.077
+endgame                9762     56.0%     59.9%       0.121
+fork                   5659     57.4%     61.1%       0.147
+hangingPiece            272     58.5%     67.8%       0.169
+equality                 41     58.5%     63.9%       0.171
+cornerMate               51     58.8%     58.9%       0.176
+mateIn3                1523     59.9%     65.3%       0.199
+attackingF2F7            98     62.2%     66.1%       0.245
+short                 13189     62.7%     67.3%       0.253
+rookEndgame             756     62.8%     63.9%       0.257
+queenRookEndgame        152     63.2%     65.2%       0.263
+kingsideAttack         2084     65.1%     68.1%       0.301
+mate                   7153     65.4%     69.7%       0.308
+operaMate               220     67.3%     67.7%       0.345
+mateIn2                5472     67.4%     72.3%       0.348
+opening                 918     67.9%     69.7%       0.357
+xRayAttack              188     68.1%     70.1%       0.362
+pillsburysMate          248     71.0%     72.5%       0.419
+anastasiaMate            47     72.3%     73.6%       0.447
+smotheredMate            58     72.4%     75.5%       0.448
+hookMate                 40     72.5%     75.6%       0.450
+arabianMate              46     78.3%     79.6%       0.565
+backRankMate            762     86.1%     87.1%       0.722
+
+Difficulty-adjusted theme breakdown (rating + move count, min episodes=20)
+Group              Episodes  Observed  Expected  Success gap  Move gap
+triangleMate             43     27.9%     53.8%       -25.8%    -14.0%
+swallowstailMate         23     26.1%     46.8%       -20.7%    -11.4%
+quietMove               170      5.3%     24.7%       -19.4%    -21.7%
+defensiveMove           280     12.9%     30.4%       -17.6%     -6.0%
+morphysMate              45     40.0%     54.7%       -14.7%     -8.1%
+trappedPiece            512     27.1%     41.1%       -13.9%    -17.0%
+knightEndgame            47     34.0%     46.9%       -12.8%     -9.3%
+bishopEndgame           113     37.2%     49.4%       -12.2%    -14.6%
+killBoxMate              26     42.3%     52.9%       -10.6%    -12.1%
+discoveredCheck         706     32.3%     42.5%       -10.2%     -7.2%
+interference             77     36.4%     46.5%       -10.1%     -9.4%
+blindSwineMate           26     46.2%     56.0%        -9.9%     -8.5%
+epauletteMate            98     49.0%     57.0%        -8.0%     -5.5%
+queenEndgame            155     47.7%     55.7%        -8.0%     -6.2%
+pawnEndgame              45     24.4%     31.7%        -7.2%     -3.6%
+capturingDefender       127     36.2%     42.4%        -6.2%     -6.5%
+advancedPawn            746     39.0%     44.7%        -5.7%     -6.1%
+promotion               320     44.1%     48.9%        -4.8%     -4.8%
+queensideAttack         399     50.6%     55.2%        -4.5%     -3.7%
+intermezzo              533     39.8%     43.4%        -3.7%     -1.3%
+discoveredAttack       2273     47.4%     50.8%        -3.5%     -3.2%
+advantage              6162     45.4%     48.1%        -2.6%     -2.4%
+master                 2287     51.7%     54.0%        -2.3%     -2.7%
+clearance               510     33.5%     35.8%        -2.2%     -0.6%
+crushing               6834     49.4%     51.6%        -2.1%     -2.1%
+skewer                  938     53.8%     56.0%        -2.1%     -2.5%
+masterVsMaster          204     50.5%     52.5%        -2.1%     -0.1%
+endgame                9762     56.0%     57.9%        -1.8%     -1.8%
+exposedKing             836     33.9%     35.5%        -1.7%     -1.9%
+deflection             1930     46.1%     47.2%        -1.1%     -0.9%
+pin                    2456     43.4%     43.8%        -0.4%     -0.9%
+queenRookEndgame        152     63.2%     63.3%        -0.1%     -1.3%
+short                 13189     62.7%     62.7%        -0.0%     -0.0%
+veryLong                959     22.6%     22.6%        +0.0%     +0.0%
+long                   6042     39.7%     39.7%        +0.0%     +0.0%
+middlegame             9510     50.3%     49.8%        +0.5%     +0.7%
+rookEndgame             756     62.8%     61.6%        +1.2%     -1.2%
+fork                   5659     57.4%     55.9%        +1.5%     +1.6%
+mateIn2                5472     67.4%     65.6%        +1.8%     +2.3%
+collinearMove            35     37.1%     34.4%        +2.7%     -4.1%
+hangingPiece            272     58.5%     55.2%        +3.2%     +8.8%
+mate                   7153     65.4%     61.2%        +4.2%     +4.3%
+enPassant                21     33.3%     28.6%        +4.7%     +6.9%
+doubleCheck             171     48.5%     43.2%        +5.3%     +7.8%
+cornerMate               51     58.8%     53.1%        +5.7%     +0.7%
+attraction             1541     43.7%     37.8%        +6.0%     +4.1%
+sacrifice              2994     49.5%     41.2%        +8.3%     +5.4%
+operaMate               220     67.3%     58.7%        +8.6%     +5.9%
+hookMate                 40     72.5%     63.7%        +8.8%     +7.7%
+attackingF2F7            98     62.2%     52.6%        +9.7%     +8.6%
+pillsburysMate          248     71.0%     60.1%       +10.8%     +8.7%
+mateIn3                1523     59.9%     49.0%       +11.0%     +7.6%
+kingsideAttack         2084     65.1%     53.3%       +11.7%    +10.9%
+arabianMate              46     78.3%     64.6%       +13.6%    +11.2%
+opening                 918     67.9%     54.0%       +13.8%    +11.6%
+xRayAttack              188     68.1%     54.2%       +13.9%    +11.1%
+backRankMate            762     86.1%     70.3%       +15.8%    +12.8%
+anastasiaMate            47     72.3%     56.2%       +16.1%    +13.0%
+equality                 41     58.5%     40.3%       +18.2%    +18.3%
+smotheredMate            58     72.4%     51.5%       +21.0%    +17.9%
+mateIn4                 158     49.4%     26.2%       +23.2%    +16.2%

@@ -1,0 +1,10 @@
+[Event "Chess Agent Match"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "uci"]
+[Black "alpha"]
+[Result "1-0"]
+[PlyCount "157"]
+
+1. c4 d5 2. cxd5 Nf6 3. Nc3 Nxd5 4. Nf3 Nc6 5. d4 Bf5 6. e3 Nxc3 7. bxc3 e6 8. Nd2 Bd6 9. e4 Bg6 10. Rb1 Rb8 11. Bb5 Qd7 12. h4 O-O 13. h5 Nxd4 14. cxd4 c6 15. Be2 Bf5 16. Qc2 Bxe4 17. Qxe4 c5 18. Bb5 Qc7 19. h6 gxh6 20. dxc5 Qxc5 21. Qg4+ Qg5 22. Be2 Kh8 23. Qxg5 hxg5 24. Bd3 f5 25. Ke2 e5 26. Bc4 Kg7 27. Nf3 g4 28. Ng5 Rh8 29. Rd1 Rhd8 30. Nf7 Rh8 31. Nxd6 f4 32. Bd5 b6 33. Bb2 Kf6 34. f3 gxf3+ 35. Bxf3 b5 36. Kf1 b4 37. Rbc1 Rhg8 38. Rc5 Rg5 39. Rcc1 Rd8 40. Rd5 Ke6 41. Rcd1 h6 42. Ne4 Rxd5 43. Rxd5 Kxd5 44. Nxg5+ Kc5 45. Nf7 b3 46. a3 e4 47. Bxe4 h5 48. Ng5 Kd6 49. Kf2 h4 50. Nf3 Ke6 51. Ng5+ Kd6 52. Kf3 h3 53. Nxh3 Ke6 54. Ng5+ Kd6 55. Bf5 Kc6 56. Be4+ Kd6 57. Kg4 f3 58. Nxf3 Ke6 59. Ng5+ Kd6 60. Kf5 Kc5 61. Bd3 Kd5 62. Nh3 Kc5 63. Ng5 Kd6 64. g4 Kd5 65. Nh3 Kc5 66. g5 Kd5 67. g6 Kd6 68. Be4 a6 69. Ng1 Kc5 70. Nh3 Kd6 71. Ng1 Kc5 72. g7 a5 73. Nf3 a4 74. g8=Q Kd6 75. Qh7 Kc5 76. Qa7+ Kc4 77. Qb8 Kc5 78. Kf4 Kc4 79. Qb4# 1-0

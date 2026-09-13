@@ -1,0 +1,20 @@
+Value-head dataset evaluation
+=============================
+Model:          tmp/full_chess_policy_value_value_best.pt
+Dataset:        data/value/full_chess_value_random100_valid.npz
+Opponent:       random
+Max plies:      100
+Gamma:          0.995
+Positions:      17201
+Games:          500
+W/D/L:          279/220/1
+Target mean:    0.36504
+Target std:     0.45701
+
+Metrics
+-------
+Huber loss:     0.11933
+MAE:            0.43910
+RMSE:           0.49131
+Explained var:  -0.12009
+Prediction std: 0.24934

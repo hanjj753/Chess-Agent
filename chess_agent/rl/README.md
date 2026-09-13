@@ -485,10 +485,30 @@ python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_termina
 python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_beta0_seed2_final_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta001_seed2_final_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_beta0_vs_beta001_seed2_seed80000.txt
 ```
 
-두 seed 모두에서 `beta=0.01`이 `beta=0`보다 높고, 평균적으로 시작 모델도 넘으며,
-checkmate가 증가하고 `max_plies`가 증가하지 않으면 `beta=0.01`을 채택합니다. 한 seed에서만
-좋거나 신뢰구간이 계속 0을 포함하면 shaping 효과가 불안정하므로 beta를 더 조정하지 않고
-학습 상대와 value potential을 먼저 다시 살펴봅니다.
+수정 후 독립 평가에서 seed 1은 `beta=0.01 - beta=0`이 +1.40%p였지만 95% 신뢰구간이
+`[-0.14, +2.94]`%p였고, seed 2의 차이는 정확히 0.00%p였습니다. 두 seed의 네 final
+모델은 모두 시작 모델 66.7%를 넘지 못했습니다. 따라서 shaping이 seed 1에서 PPO 열화를
+줄인 정황은 있지만, 반복 가능한 개선으로 확정할 수는 없습니다.
+
+기존 seed 0의 같은 4,096 timestep 모델도 동일한 평가 대국에 붙여 3-seed 표를
+완성합니다. Seed 0은 checkpoint seed와 stage seed가 원래 모두 0이어서 resume seed
+버그의 영향을 받지 않았으므로 다시 학습할 필요는 없습니다.
+
+```bash
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta0_seed0_checkpoints/full_chess_ppo_28672.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_p25_terminalfix_seedfix_beta0_seed0_step28672_seed80000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_checkpoints/full_chess_ppo_28672.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_p25_terminalfix_seedfix_beta001_seed0_step28672_seed80000_1000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta0_seed0_step28672_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_initial_vs_beta0_seed0_seed80000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta001_seed0_step28672_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_initial_vs_beta001_seed0_seed80000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_beta0_seed0_step28672_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta001_seed0_step28672_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_beta0_vs_beta001_seed0_seed80000.txt
+```
+
+동일한 seed 80,000 평가에서 seed 0의 `beta=0.01 - beta=0`은 +0.35%p였고 95%
+신뢰구간은 `[-1.10, +1.80]`%p였습니다. 세 학습 seed의 차이는 각각 +0.35%p,
++1.40%p, 0.00%p로 평균 +0.58%p입니다. Shaping이 PPO 열화를 조금 완화하는 방향은
+일관되지만 모든 신뢰구간이 0을 포함하고, `beta=0.01` 세 모델의 평균 65.7%도 시작
+모델 66.7%보다 낮습니다. 따라서 `beta=0.01`을 성능 개선으로 채택하지 않고 beta
+조정을 여기서 멈춥니다. 다음 실험에서는 사전학습 policy가 흐려지는 원인으로
+`entropy_coefficient`를 먼저 분리해 확인합니다.
 
 best checkpoint 선택용 평가는 shaping을 사용하지 않고 실제 승·무·패만 사용합니다.
 `games.csv`의 `reward`와 `extrinsic_reward`도 실제 대국 결과를 유지하고,

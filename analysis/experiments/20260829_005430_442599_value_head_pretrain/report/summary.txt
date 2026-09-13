@@ -1,0 +1,41 @@
+Value-head supervised pretraining 보고서
+=======================================
+실험 이름:       value_head_pretrain
+실험 폴더:       analysis/experiments/20260829_005430_442599_value_head_pretrain
+source model:    tmp/full_chess_policy_value.pt
+train data:      data/value/full_chess_value_train.npz
+validation data: data/value/full_chess_value_valid.npz
+완료 epoch:      46
+목표 epoch:      50
+batch size:      1,024
+learning rate:   0.001
+대국 균형:       True
+승무패 균형:     True
+소요 시간:       1m 32s
+
+학습 지표
+---------
+train_loss                       initial=  0.18839 min=  0.08034 max=  0.18839 last=  0.08042
+validation_loss                  initial=  0.27536 min=  0.09712 max=  0.27536 last=  0.09778
+validation_mae                   initial=  0.62728 min=  0.34424 max=  0.62728 last=  0.34443
+validation_rmse                  initial=  0.74293 min=  0.44433 max=  0.74293 last=  0.44592
+validation_explained_variance    initial=  0.00370 min=  0.00370 max=  0.64262 last=  0.64094
+validation_target_std            initial=  0.74207 min=  0.74207 max=  0.74207 last=  0.74207
+validation_prediction_std        initial=  0.03446 min=  0.03446 max=  0.64070 last=  0.63036
+
+Best checkpoint
+---------------
+epoch:            36
+path:             tmp/full_chess_policy_value_value_best.pt
+validation loss:  0.09712
+
+해석과 주의사항
+----------------
+- value 예측이 target 차이를 양의 explained variance로 설명하기 시작했습니다.
+
+빠르게 볼 항목
+--------------
+1. validation loss와 MAE가 감소하는가?
+2. explained variance가 0보다 높아지는가?
+3. prediction std가 0에 머물지 않고 target std에 가까워지는가?
+4. best epoch 이후 validation 성능이 악화되어 과적합하지 않는가?

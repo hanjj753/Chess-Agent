@@ -1,0 +1,10 @@
+[Event "Chess Agent Match"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "alpha"]
+[Black "uci"]
+[Result "0-1"]
+[PlyCount "36"]
+
+1. Nf3 d5 2. Nc3 d4 3. Ne4 Nf6 4. Nxf6+ exf6 5. e4 f5 6. d3 Nc6 7. Bg5 Bb4+ 8. Ke2 Qd6 9. h3 fxe4 10. dxe4 h6 11. Bd2 O-O 12. Bxb4 Qxb4 13. Rb1 Re8 14. Qd3 Qa5 15. Nxd4 Qd5 16. Nxc6 Rxe4+ 17. Kf3 Qf5+ 18. Kg3 Qf4# 0-1

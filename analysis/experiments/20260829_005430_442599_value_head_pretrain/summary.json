@@ -1,0 +1,35 @@
+{
+  "completed_at": "2026-08-28T15:56:02+00:00",
+  "summary": {
+    "best_epoch": 36,
+    "best_model_path": "tmp/full_chess_policy_value_value_best.pt",
+    "best_validation": {
+      "explained_variance": 0.6426239614592913,
+      "loss": 0.09711973898229383,
+      "mae": 0.34577469190778487,
+      "prediction_std": 0.6278858635289061,
+      "rmse": 0.44433332153536953,
+      "target_std": 0.742065904857614
+    },
+    "completed_epochs": 46,
+    "experiment_run_dir": "analysis/experiments/20260829_005430_442599_value_head_pretrain",
+    "final_model_path": "tmp/full_chess_policy_value_value_final.pt",
+    "final_validation": {
+      "explained_variance": 0.640935458450642,
+      "loss": 0.09777980322990458,
+      "mae": 0.34443095049669137,
+      "prediction_std": 0.6303645162853186,
+      "rmse": 0.4459238826283791,
+      "target_std": 0.742065904857614
+    },
+    "initial_validation": {
+      "explained_variance": 0.00369750232577315,
+      "loss": 0.275361147844002,
+      "mae": 0.6272799545578805,
+      "prediction_std": 0.03445807157030164,
+      "rmse": 0.7429298977653613,
+      "target_std": 0.742065904857614
+    },
+    "stopped_early": true
+  }
+}

@@ -1,0 +1,463 @@
+{
+  "completed_at": "2026-08-26T18:00:29+00:00",
+  "summary": {
+    "best_model_path": "tmp/full_chess_ppo_stability_lr3e5_best.zip",
+    "completed_timesteps": 4096,
+    "experiment_run_dir": "analysis/experiments/20260827_030001_614050_ppo_stability_lr3e5",
+    "final_evaluation": {
+      "games": [
+        {
+          "agent_color": "white",
+          "episode": 1,
+          "illegal_action": false,
+          "plies": 91,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 2,
+          "illegal_action": false,
+          "plies": 84,
+          "result": "0-1",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "white",
+          "episode": 3,
+          "illegal_action": false,
+          "plies": 23,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 4,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "white",
+          "episode": 5,
+          "illegal_action": false,
+          "plies": 49,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 6,
+          "illegal_action": false,
+          "plies": 36,
+          "result": "0-1",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "white",
+          "episode": 7,
+          "illegal_action": false,
+          "plies": 69,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 8,
+          "illegal_action": false,
+          "plies": 56,
+          "result": "0-1",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "white",
+          "episode": 9,
+          "illegal_action": false,
+          "plies": 17,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 10,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "white",
+          "episode": 11,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "black",
+          "episode": 12,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "white",
+          "episode": 13,
+          "illegal_action": false,
+          "plies": 73,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "threefold_repetition"
+        },
+        {
+          "agent_color": "black",
+          "episode": 14,
+          "illegal_action": false,
+          "plies": 87,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "threefold_repetition"
+        },
+        {
+          "agent_color": "white",
+          "episode": 15,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "black",
+          "episode": 16,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "white",
+          "episode": 17,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "black",
+          "episode": 18,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "white",
+          "episode": 19,
+          "illegal_action": false,
+          "plies": 37,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "threefold_repetition"
+        },
+        {
+          "agent_color": "black",
+          "episode": 20,
+          "illegal_action": false,
+          "plies": 18,
+          "result": "0-1",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "white",
+          "episode": 21,
+          "illegal_action": false,
+          "plies": 93,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 22,
+          "illegal_action": false,
+          "plies": 66,
+          "result": "0-1",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "white",
+          "episode": 23,
+          "illegal_action": false,
+          "plies": 87,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 24,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "white",
+          "episode": 25,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "black",
+          "episode": 26,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "white",
+          "episode": 27,
+          "illegal_action": false,
+          "plies": 25,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 28,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "white",
+          "episode": 29,
+          "illegal_action": false,
+          "plies": 47,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 30,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "white",
+          "episode": 31,
+          "illegal_action": false,
+          "plies": 81,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 32,
+          "illegal_action": false,
+          "plies": 78,
+          "result": "0-1",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "white",
+          "episode": 33,
+          "illegal_action": false,
+          "plies": 21,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 34,
+          "illegal_action": false,
+          "plies": 86,
+          "result": "0-1",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "white",
+          "episode": 35,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "black",
+          "episode": 36,
+          "illegal_action": false,
+          "plies": 52,
+          "result": "0-1",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "white",
+          "episode": 37,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "black",
+          "episode": 38,
+          "illegal_action": false,
+          "plies": 68,
+          "result": "0-1",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "white",
+          "episode": 39,
+          "illegal_action": false,
+          "plies": 83,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 40,
+          "illegal_action": false,
+          "plies": 64,
+          "result": "0-1",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "white",
+          "episode": 41,
+          "illegal_action": false,
+          "plies": 73,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 42,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "white",
+          "episode": 43,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "black",
+          "episode": 44,
+          "illegal_action": false,
+          "plies": 12,
+          "result": "0-1",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "white",
+          "episode": 45,
+          "illegal_action": false,
+          "plies": 37,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 46,
+          "illegal_action": false,
+          "plies": 78,
+          "result": "0-1",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "white",
+          "episode": 47,
+          "illegal_action": false,
+          "plies": 57,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 48,
+          "illegal_action": false,
+          "plies": 72,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "threefold_repetition"
+        },
+        {
+          "agent_color": "white",
+          "episode": 49,
+          "illegal_action": false,
+          "plies": 59,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 50,
+          "illegal_action": false,
+          "plies": 50,
+          "result": "0-1",
+          "reward": 1.0,
+          "termination": "checkmate"
+        }
+      ]
+    },
+    "final_model_path": "tmp/full_chess_ppo_stability_lr3e5_final.zip"
+  }
+}

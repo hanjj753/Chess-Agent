@@ -1,0 +1,25 @@
+Full-chess PPO evaluation
+Model:          tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_checkpoints/full_chess_ppo_28672.zip
+Opponent:       alpha-random
+Games:          1000
+W/D/L:          323/659/18
+Score rate:     65.2%
+Average reward: 0.305
+Average plies:  77.8
+Illegal moves:  0
+Base seed:      80000
+Deterministic:  yes
+Max plies:      100
+Alpha move prob:   25.0%
+
+Color breakdown
+Color   Games   W/D/L   Score
+white     500   156/337/7    64.9%
+black     500   167/322/11    65.6%
+
+Termination breakdown
+Termination             Games
+max_plies                461
+checkmate                341
+threefold_repetition     194
+stalemate                  4

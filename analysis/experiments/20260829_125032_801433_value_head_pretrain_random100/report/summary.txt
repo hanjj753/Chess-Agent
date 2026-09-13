@@ -1,0 +1,47 @@
+Value-head supervised pretraining 보고서
+=======================================
+실험 이름:       value_head_pretrain_random100
+실험 폴더:       analysis/experiments/20260829_125032_801433_value_head_pretrain_random100
+source model:    tmp/full_chess_policy_value.pt
+train data:      data/value/full_chess_value_random100_train.npz
+validation data: data/value/full_chess_value_random100_valid.npz
+완료 epoch:      23
+목표 epoch:      50
+batch size:      1,024
+learning rate:   0.001
+대국 균형:       True
+승무패 균형:     False
+소요 시간:       51s
+
+데이터셋
+--------
+train      positions=  163,677 games= 4,500 W/D/L=2,436/2,055/9
+validation positions=   17,201 games=   500 W/D/L=279/220/1
+수집 조건:       opponent=random, max_plies=100, gamma=0.995
+
+학습 지표
+---------
+train_loss                       initial=  0.10533 min=  0.09147 max=  0.10533 last=  0.09147
+validation_loss                  initial=  0.14113 min=  0.10023 max=  0.14113 last=  0.10139
+validation_mae                   initial=  0.38997 min=  0.38997 max=  0.42137 last=  0.40461
+validation_rmse                  initial=  0.53130 min=  0.44809 max=  0.53130 last=  0.45070
+validation_explained_variance    initial= -0.01340 min= -0.01340 max=  0.09157 last=  0.07363
+validation_target_std            initial=  0.45701 min=  0.45701 max=  0.45701 last=  0.45701
+validation_prediction_std        initial=  0.03512 min=  0.03512 max=  0.20111 last=  0.20111
+
+Best checkpoint
+---------------
+epoch:            13
+path:             tmp/full_chess_policy_value_random100_best.pt
+validation loss:  0.10023
+
+해석과 주의사항
+----------------
+- value 예측이 target 차이를 양의 explained variance로 설명하기 시작했습니다.
+
+빠르게 볼 항목
+--------------
+1. validation loss와 MAE가 감소하는가?
+2. explained variance가 0보다 높아지는가?
+3. prediction std가 0에 머물지 않고 target std에 가까워지는가?
+4. best epoch 이후 validation 성능이 악화되어 과적합하지 않는가?

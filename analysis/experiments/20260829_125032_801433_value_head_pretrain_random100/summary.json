@@ -1,0 +1,87 @@
+{
+  "completed_at": "2026-08-29T03:51:23+00:00",
+  "summary": {
+    "best_epoch": 13,
+    "best_model_path": "tmp/full_chess_policy_value_random100_best.pt",
+    "best_validation": {
+      "explained_variance": 0.08127689706358099,
+      "loss": 0.10022729571296213,
+      "mae": 0.40553138396989646,
+      "prediction_std": 0.19146128347878666,
+      "rmse": 0.4480943164647976,
+      "target_std": 0.4570051912792743
+    },
+    "completed_epochs": 23,
+    "experiment_run_dir": "analysis/experiments/20260829_125032_801433_value_head_pretrain_random100",
+    "final_model_path": "tmp/full_chess_policy_value_random100_final.pt",
+    "final_validation": {
+      "explained_variance": 0.0736326042949107,
+      "loss": 0.10139330739290875,
+      "mae": 0.40460879959840246,
+      "prediction_std": 0.20111489949355002,
+      "rmse": 0.4506998419667287,
+      "target_std": 0.4570051912792743
+    },
+    "initial_validation": {
+      "explained_variance": -0.013402452034568135,
+      "loss": 0.14113474419033079,
+      "mae": 0.38997407813364615,
+      "prediction_std": 0.03512107897791901,
+      "rmse": 0.5312955631018325,
+      "target_std": 0.4570051912792743
+    },
+    "stopped_early": true,
+    "train_dataset": {
+      "draws": 2055,
+      "games": 4500,
+      "losses": 9,
+      "metadata": {
+        "alpha_fraction": null,
+        "deterministic_policy": false,
+        "games": 5000,
+        "gamma": 0.995,
+        "history_length": 4,
+        "max_plies": 100,
+        "opponent": "random",
+        "opponent_depth": 1,
+        "opponent_time_limit": null,
+        "seed": 0,
+        "source_model": "tmp/full_chess_policy_value.pt",
+        "split": "train",
+        "temperature": 1.0,
+        "validation_fraction": 0.1,
+        "version": 1
+      },
+      "positions": 163677,
+      "target_mean": 0.36935389041900635,
+      "target_std": 0.457427978515625,
+      "wins": 2436
+    },
+    "validation_dataset": {
+      "draws": 220,
+      "games": 500,
+      "losses": 1,
+      "metadata": {
+        "alpha_fraction": null,
+        "deterministic_policy": false,
+        "games": 5000,
+        "gamma": 0.995,
+        "history_length": 4,
+        "max_plies": 100,
+        "opponent": "random",
+        "opponent_depth": 1,
+        "opponent_time_limit": null,
+        "seed": 0,
+        "source_model": "tmp/full_chess_policy_value.pt",
+        "split": "validation",
+        "temperature": 1.0,
+        "validation_fraction": 0.1,
+        "version": 1
+      },
+      "positions": 17201,
+      "target_mean": 0.3650398552417755,
+      "target_std": 0.45700517296791077,
+      "wins": 279
+    }
+  }
+}

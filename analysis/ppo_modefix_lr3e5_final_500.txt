@@ -1,0 +1,21 @@
+Full-chess PPO evaluation
+Model:          tmp/full_chess_ppo_modefix_lr3e5_final.zip
+Opponent:       random
+Games:          500
+W/D/L:          280/220/0
+Score rate:     78.0%
+Average reward: 0.560
+Average plies:  64.5
+Illegal moves:  0
+
+Color breakdown
+Color   Games   W/D/L   Score
+white     250   141/109/0    78.2%
+black     250   139/111/0    77.8%
+
+Termination breakdown
+Termination             Games
+checkmate                280
+max_plies                142
+threefold_repetition      72
+stalemate                  6

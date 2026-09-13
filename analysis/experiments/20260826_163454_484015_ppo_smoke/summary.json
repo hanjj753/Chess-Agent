@@ -1,0 +1,103 @@
+{
+  "completed_at": "2026-08-26T07:35:10+00:00",
+  "summary": {
+    "best_model_path": "tmp/full_chess_ppo_best.zip",
+    "completed_timesteps": 4096,
+    "experiment_run_dir": "analysis/experiments/20260826_163454_484015_ppo_smoke",
+    "final_evaluation": {
+      "games": [
+        {
+          "agent_color": "white",
+          "episode": 1,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "black",
+          "episode": 2,
+          "illegal_action": false,
+          "plies": 38,
+          "result": "0-1",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "white",
+          "episode": 3,
+          "illegal_action": false,
+          "plies": 23,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 4,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "white",
+          "episode": 5,
+          "illegal_action": false,
+          "plies": 57,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 6,
+          "illegal_action": false,
+          "plies": 100,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "max_plies"
+        },
+        {
+          "agent_color": "white",
+          "episode": 7,
+          "illegal_action": false,
+          "plies": 51,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 8,
+          "illegal_action": false,
+          "plies": 56,
+          "result": "1/2-1/2",
+          "reward": 0.0,
+          "termination": "threefold_repetition"
+        },
+        {
+          "agent_color": "white",
+          "episode": 9,
+          "illegal_action": false,
+          "plies": 23,
+          "result": "1-0",
+          "reward": 1.0,
+          "termination": "checkmate"
+        },
+        {
+          "agent_color": "black",
+          "episode": 10,
+          "illegal_action": false,
+          "plies": 44,
+          "result": "0-1",
+          "reward": 1.0,
+          "termination": "checkmate"
+        }
+      ]
+    },
+    "final_model_path": "tmp/full_chess_ppo_final.zip"
+  }
+}
