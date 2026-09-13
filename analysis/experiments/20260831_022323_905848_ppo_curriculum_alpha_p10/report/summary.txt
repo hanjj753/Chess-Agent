@@ -1,0 +1,85 @@
+Full-Chess PPO 실험 자동 보고서
+==================================
+실험 이름:       ppo_curriculum_alpha_p10
+실험 폴더:       analysis/experiments/20260831_022323_905848_ppo_curriculum_alpha_p10
+완료 timestep:   24,576
+목표 timestep:   24,576
+학습 상대:       alpha-random
+상대 설정:       depth=1, time_limit=None, alpha_move_probability=10.0%
+학습률:          3e-05
+rollout:         n_envs=4 x n_steps=256
+PPO update:      batch=256, epochs=2
+PPO limits:      clip=0.2, target_kl=0.03
+게임 제한:       max_plies=100
+소요 시간:       2m 13s
+단계 시작:       16,384
+이번 단계 학습:  8,192
+
+단위 설명
+---------
+episode 1개는 현재 환경에서 체스 대국 1판입니다.
+timestep 1개는 agent가 수 1개를 선택한 순간이며, 환경이 상대 응수까지 진행합니다.
+rollout은 PPO update 전에 모으는 여러 timestep 묶음이고, 여러 episode가 섞일 수 있습니다.
+evaluation 대국은 학습 데이터를 만들지 않고 현재 실력만 측정합니다.
+
+학습 대국 요약
+--------------
+대국 수:         208
+W/D/L:           86/118/4
+점수율:          69.7%
+평균 game plies: 77.5
+종료 max_plies               98 (47.1%)
+종료 checkmate               90 (43.3%)
+종료 threefold_repetition    18 ( 8.7%)
+종료 stalemate                2 ( 1.0%)
+
+평가 스냅샷
+-------------
+구분                 step  games       W/D/L   score  avg plies
+evaluation           16,384    100  54/ 46/  0   77.0%       68.6
+evaluation           18,432    100  47/ 53/  0   73.5%       70.2
+evaluation           20,480    100  51/ 48/  1   75.0%       69.2
+evaluation           22,528    100  44/ 56/  0   72.0%       74.0
+evaluation           24,576    100  44/ 56/  0   72.0%       73.0
+final_evaluation     24,576    100  50/ 50/  0   75.0%       67.8
+
+Best checkpoint
+---------------
+step:             16,384
+path:             tmp/full_chess_ppo_alpha_p10_best.zip
+evaluation score: 77.0%
+
+PPO 학습 진단
+-------------
+policy_loss          avg=  -0.0109 min=  -0.0138 max=  -0.0083 last=  -0.0094
+value_loss           avg=   0.0625 min=   0.0412 max=   0.0825 last=   0.0728
+entropy              avg=   1.1989 min=   1.1457 max=   1.2226 last=   1.2104
+approx_kl            avg=   0.0028 min=   0.0020 max=   0.0040 last=   0.0020
+clip_fraction        avg=   0.0128 min=   0.0083 max=   0.0234 last=   0.0103
+explained_variance   avg=  -0.0485 min=  -0.2803 max=   0.2140 last=  -0.0645
+
+Rollout과 Critic 입력
+-------------------
+transition 수         avg= 1024.000 min= 1024.000 max= 1024.000 last= 1024.000
+완결 대국 수              avg=   26.000 min=   23.000 max=   31.000 last=   29.000
+승패 대국 수              avg=   11.250 min=    7.000 max=   16.000 last=   13.000
+reward 신호 비율         avg=   1.10% min=   0.68% max=   1.56% last=   1.27%
+return 표준편차          avg=    0.243 min=    0.210 max=    0.271 last=    0.262
+value 예측 표준편차        avg=    0.156 min=    0.139 max=    0.171 last=    0.139
+advantage 표준편차       avg=    0.248 min=    0.203 max=    0.285 last=    0.270
+
+해석과 주의사항
+----------------
+아래 임계값은 빠른 점검용 경험적 경고이며 절대적인 합격 기준은 아닙니다.
+- 평가 대국이 200판보다 적은 시점이 있어 checkpoint 선택이 표본 변동에 흔들릴 수 있습니다.
+- 평균 explained_variance가 음수여서 Critic이 아직 유용한 value 예측을 하지 못합니다.
+- 불법 수 종료가 0판이므로 action masking은 정상 동작했습니다.
+
+빠르게 볼 항목
+--------------
+1. evaluation score가 step에 따라 실제로 상승하는가?
+2. max_plies 무승부가 줄고 checkmate 승리가 늘어나는가?
+3. approx_kl과 clip_fraction이 지나치게 크지 않은가?
+4. explained_variance가 0보다 높아지며 Critic이 학습되는가?
+5. rollout마다 완결/승패 대국과 reward 신호가 충분히 들어오는가?
+6. illegal action이 항상 0인가?
