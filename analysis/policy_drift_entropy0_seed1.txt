@@ -1,0 +1,32 @@
+PPO policy drift evaluation
+Reference:       tmp/full_chess_ppo_alpha_p25_initial.zip
+Candidate:       tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed1_final.zip
+Puzzles file:    data/puzzle_processed/tactical_valid.txt
+Puzzles:         20190
+Agent positions: 48341
+History length:  4
+
+Distribution drift
+Reference entropy:         0.5513
+Candidate entropy:         0.5364
+Entropy delta:             -0.0149
+Reference effective moves: 1.74
+Candidate effective moves: 1.71
+KL(reference || candidate): 0.003239
+Jensen-Shannon divergence:  0.000795
+Top-1 agreement:           98.2%
+
+Tactical move retention
+Reference top-1 accuracy:  74.4%
+Candidate top-1 accuracy:  74.3%
+Accuracy delta:            -0.1%
+Reference correct prob:    68.9%
+Candidate correct prob:    69.1%
+Correct-prob delta:        +0.2%
+Candidate-only correct:    287
+Reference-only correct:    319
+
+Interpretation
+Positive entropy delta means the candidate distributes probability
+across more legal moves. KL/JS near zero and high top-1 agreement mean
+the candidate stayed close to the pretrained reference policy.
