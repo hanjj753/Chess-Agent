@@ -41,6 +41,7 @@ Gymnasium 환경
 - `train_full_chess_ppo.py`: FullChess Maskable PPO 학습, 평가, checkpoint 기록
 - `evaluate_full_chess_ppo.py`: 저장된 PPO 모델의 독립 대국 평가와 TXT 보고서
 - `compare_full_chess_evaluations.py`: 같은 seed의 두 평가 CSV를 paired 비교
+- `evaluate_policy_drift.py`: 고정 tactical position에서 사전학습/미세조정 policy 분포 비교
 - `report_experiment.py`: 실험 로그를 한국어 TXT와 발표용 PNG로 자동 요약
 
 ## Full-Chess 환경
@@ -509,6 +510,75 @@ python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_termina
 모델 66.7%보다 낮습니다. 따라서 `beta=0.01`을 성능 개선으로 채택하지 않고 beta
 조정을 여기서 멈춥니다. 다음 실험에서는 사전학습 policy가 흐려지는 원인으로
 `entropy_coefficient`를 먼저 분리해 확인합니다.
+
+### Entropy coefficient와 policy drift 대조 실험
+
+PPO loss에는 policy/value 학습 외에 `- entropy_coefficient * H(policy)` 항이 들어갑니다.
+양수인 coefficient는 합법 수 사이의 확률분포를 더 넓게 유지해서 탐험을 돕지만,
+이미 tactical supervised learning으로 얻은 좋은 수의 확률까지 낮출 수 있습니다. 이것을
+여기서는 **policy drift**라고 부릅니다. 즉 같은 고정 position에서 PPO 이후 action
+확률분포가 사전학습 policy에서 얼마나 이동했는지를 뜻합니다.
+
+`entropy_coefficient=0`은 최적값이라고 가정한 값이 아니라 entropy bonus만 제거하는
+대조군입니다. 0이어도 rollout에서는 policy 확률에 따라 stochastic sampling하므로
+탐험이 완전히 사라지거나 policy가 강제로 deterministic해지지 않습니다. 현재 값
+`0.01`과 비교해서 entropy bonus가 열화의 원인인지 분리하는 것이 목적입니다.
+
+resume 학습은 checkpoint에 저장된 entropy coefficient 대신 명령행에서 지정한 값을
+사용합니다. 나머지 조건은 `beta=0.01`, p25 상대, 4,096 timestep으로 고정하고 학습
+seed만 0/1/2로 반복합니다.
+
+```bash
+python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_alpha_p25_initial.zip --additional-timesteps 4096 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --reward-shaping-coefficient 0.01 --reward-shaping-scale 600 --entropy-coefficient 0 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 --seed 0 --device cuda --initial-model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed0_initial.zip --save-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed0_final.zip --best-model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed0_best.zip --checkpoint-dir tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed0_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_alpha_p25_entropy0_beta001_seed0
+python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_alpha_p25_initial.zip --additional-timesteps 4096 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --reward-shaping-coefficient 0.01 --reward-shaping-scale 600 --entropy-coefficient 0 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 --seed 1 --device cuda --initial-model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed1_initial.zip --save-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed1_final.zip --best-model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed1_best.zip --checkpoint-dir tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed1_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_alpha_p25_entropy0_beta001_seed1
+python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_alpha_p25_initial.zip --additional-timesteps 4096 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --reward-shaping-coefficient 0.01 --reward-shaping-scale 600 --entropy-coefficient 0 --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 --learning-rate 0.00003 --target-kl 0.03 --max-plies 100 --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 --seed 2 --device cuda --initial-model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed2_initial.zip --save-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed2_final.zip --best-model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed2_best.zip --checkpoint-dir tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed2_checkpoints --experiment-dir analysis/experiments --experiment-name ppo_alpha_p25_entropy0_beta001_seed2
+python -m chess_agent.rl.report_experiment analysis/experiments
+```
+
+#### 고정 tactical position에서 drift 측정
+
+`evaluate_policy_drift`는 validation puzzle의 모든 agent 차례에서 두 PPO policy의
+마스킹된 합법 수 확률을 비교합니다. TXT 요약과 함께 position별 CSV도 자동 저장합니다.
+
+- `entropy delta`: 양수일수록 후보 policy의 확률이 더 많은 수로 퍼짐
+- `KL(reference || candidate)`, `Jensen-Shannon`: 분포 자체가 이동한 정도
+- `top-1 agreement`: 두 policy가 가장 높은 확률을 준 수가 같은 비율
+- `top-1 accuracy`: puzzle 정답을 1순위로 둔 비율
+- `correct probability`: 정답 수에 배정한 평균 확률
+
+```bash
+python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_checkpoints/full_chess_ppo_28672.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/policy_drift_entropy001_seed0.txt
+python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed1_final.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/policy_drift_entropy001_seed1.txt
+python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed2_final.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/policy_drift_entropy001_seed2.txt
+python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed0_final.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/policy_drift_entropy0_seed0.txt
+python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed1_final.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/policy_drift_entropy0_seed1.txt
+python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed2_final.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/policy_drift_entropy0_seed2.txt
+```
+
+#### 독립 대국 평가
+
+학습 중 300판 best 평가는 모델 선택용입니다. 최종 판단은 학습에 쓰지 않은 동일한
+`seed=90000`의 1,000판으로 `entropy=0.01`과 `entropy=0`을 다시 평가합니다.
+
+```bash
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_initial.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_p25_entropy_initial_seed90000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_checkpoints/full_chess_ppo_28672.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_p25_entropy001_seed0_seed90000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed1_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_p25_entropy001_seed1_seed90000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed2_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_p25_entropy001_seed2_seed90000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed0_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_p25_entropy0_seed0_seed90000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed1_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_p25_entropy0_seed1_seed90000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed2_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_p25_entropy0_seed2_seed90000_1000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_entropy001_seed0_seed90000_1000_games.csv analysis/ppo_p25_entropy0_seed0_seed90000_1000_games.csv --output-path analysis/ppo_p25_entropy001_vs_entropy0_seed0_seed90000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_entropy001_seed1_seed90000_1000_games.csv analysis/ppo_p25_entropy0_seed1_seed90000_1000_games.csv --output-path analysis/ppo_p25_entropy001_vs_entropy0_seed1_seed90000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_entropy001_seed2_seed90000_1000_games.csv analysis/ppo_p25_entropy0_seed2_seed90000_1000_games.csv --output-path analysis/ppo_p25_entropy001_vs_entropy0_seed2_seed90000.txt
+```
+
+`entropy=0`이 3개 seed 중 적어도 2개에서 독립 대국 점수를 높이고, 동시에 KL/entropy
+drift가 줄며 tactical 정답 확률이 유지되면 현재 `0.01`이 큰 값이었다고 판단합니다.
+그때 다음 후보는 `0.001`입니다. Drift만 줄고 시작 모델보다 여전히 약하면 entropy는
+원인의 일부일 뿐이므로, 다음 단계는 초기 policy와의 KL penalty 또는 supervised
+auxiliary loss입니다. 반대로 `entropy=0`이 더 나쁘면 탐험 보너스가 필요하다는 뜻이므로
+역시 `0.001`처럼 더 작은 양수를 시험합니다.
 
 best checkpoint 선택용 평가는 shaping을 사용하지 않고 실제 승·무·패만 사용합니다.
 `games.csv`의 `reward`와 `extrinsic_reward`도 실제 대국 결과를 유지하고,

@@ -345,7 +345,7 @@ def test_full_chess_ppo_resume_can_add_stage_timesteps(tmp_path: Path) -> None:
     assert resumed.completed_timesteps == 4
 
 
-def test_full_chess_ppo_resume_overrides_checkpoint_seed(tmp_path: Path) -> None:
+def test_full_chess_ppo_resume_overrides_stage_settings(tmp_path: Path) -> None:
     checkpoint_seed = 7
     stage_seed = 73
     _, first = train_full_chess_ppo(
@@ -361,6 +361,7 @@ def test_full_chess_ppo_resume_overrides_checkpoint_seed(tmp_path: Path) -> None
         smoke_config(
             additional_timesteps=0,
             seed=stage_seed,
+            entropy_coefficient=0.0,
             resume_from=first.final_model_path,
             save_path=tmp_path / "resumed.zip",
             initial_model_path=tmp_path / "resumed_initial.zip",
@@ -370,6 +371,7 @@ def test_full_chess_ppo_resume_overrides_checkpoint_seed(tmp_path: Path) -> None
 
     assert resumed.trained_timesteps == 0
     assert model.seed == stage_seed
+    assert model.ent_coef == 0.0
     assert model.get_env() is not None
     assert model.get_env()._seeds == [stage_seed]
 

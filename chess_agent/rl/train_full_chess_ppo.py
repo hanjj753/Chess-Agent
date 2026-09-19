@@ -407,6 +407,7 @@ def train_full_chess_ppo(
                 flush=True,
             )
             model.target_kl = config.target_kl
+            model.ent_coef = config.entropy_coefficient
         else:
             if config.pretrained_policy_value_path is not None:
                 pretrained_model = load_policy_value(
