@@ -196,17 +196,17 @@ python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_rollout1024_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis\ppo_rollout1024_final_500.txt
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_valuepretrain_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis\ppo_valuepretrain_final_500.txt
-.\.venv\Scripts\python -m chess_agent.rl.compare_full_chess_evaluations analysis\ppo_rollout1024_final_500_games.csv analysis\ppo_valuepretrain_final_500_games.csv --output-path analysis\ppo_rollout1024_vs_valuepretrain_final.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_rollout1024_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis\ppo_value\ppo_rollout1024_final_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_valuepretrain_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis\ppo_value\ppo_valuepretrain_final_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.compare_full_chess_evaluations analysis\ppo_value\ppo_rollout1024_final_500_games.csv analysis\ppo_value\ppo_valuepretrain_final_500_games.csv --output-path analysis\ppo_value\ppo_rollout1024_vs_valuepretrain_final.txt
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_rollout1024_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis/ppo_rollout1024_final_500.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_valuepretrain_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis/ppo_valuepretrain_final_500.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_rollout1024_final_500_games.csv analysis/ppo_valuepretrain_final_500_games.csv --output-path analysis/ppo_rollout1024_vs_valuepretrain_final.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_rollout1024_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis/ppo_value/ppo_rollout1024_final_500.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_valuepretrain_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis/ppo_value/ppo_valuepretrain_final_500.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_value/ppo_rollout1024_final_500_games.csv analysis/ppo_value/ppo_valuepretrain_final_500_games.csv --output-path analysis/ppo_value/ppo_rollout1024_vs_valuepretrain_final.txt
 ```
 
 ### PPO 조건 일치 Value 재실험
@@ -249,15 +249,15 @@ python -m chess_agent.rl.pretrain_value_head --model-path tmp/full_chess_policy_
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_value_head --model-path tmp\full_chess_policy_value_value_best.pt --data data\value\full_chess_value_random100_valid.npz --device cuda --output-path analysis\value_mixed200_on_random100.txt
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_value_head --model-path tmp\full_chess_policy_value_random100_best.pt --data data\value\full_chess_value_random100_valid.npz --device cuda --output-path analysis\value_random100_on_random100.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_value_head --model-path tmp\full_chess_policy_value_value_best.pt --data data\value\full_chess_value_random100_valid.npz --device cuda --output-path analysis\value\value_mixed200_on_random100.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_value_head --model-path tmp\full_chess_policy_value_random100_best.pt --data data\value\full_chess_value_random100_valid.npz --device cuda --output-path analysis\value\value_random100_on_random100.txt
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.evaluate_value_head --model-path tmp/full_chess_policy_value_value_best.pt --data data/value/full_chess_value_random100_valid.npz --device cuda --output-path analysis/value_mixed200_on_random100.txt
-python -m chess_agent.rl.evaluate_value_head --model-path tmp/full_chess_policy_value_random100_best.pt --data data/value/full_chess_value_random100_valid.npz --device cuda --output-path analysis/value_random100_on_random100.txt
+python -m chess_agent.rl.evaluate_value_head --model-path tmp/full_chess_policy_value_value_best.pt --data data/value/full_chess_value_random100_valid.npz --device cuda --output-path analysis/value/value_mixed200_on_random100.txt
+python -m chess_agent.rl.evaluate_value_head --model-path tmp/full_chess_policy_value_random100_best.pt --data data/value/full_chess_value_random100_valid.npz --device cuda --output-path analysis/value/value_random100_on_random100.txt
 ```
 
 두 TXT에서 Huber loss와 MAE는 낮을수록, explained variance는 높을수록 좋습니다. 이
@@ -282,17 +282,17 @@ python -m chess_agent.rl.train_full_chess_ppo --pretrained-policy-value tmp/full
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_rollout1024_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis\ppo_rollout1024_final_500.txt
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_value_random100_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis\ppo_value_random100_final_500.txt
-.\.venv\Scripts\python -m chess_agent.rl.compare_full_chess_evaluations analysis\ppo_rollout1024_final_500_games.csv analysis\ppo_value_random100_final_500_games.csv --output-path analysis\ppo_rollout1024_vs_value_random100_final.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_rollout1024_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis\ppo_value\ppo_rollout1024_final_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_value_random100_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis\ppo_value\ppo_value_random100_final_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.compare_full_chess_evaluations analysis\ppo_value\ppo_rollout1024_final_500_games.csv analysis\ppo_value\ppo_value_random100_final_500_games.csv --output-path analysis\ppo_value\ppo_rollout1024_vs_value_random100_final.txt
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_rollout1024_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis/ppo_rollout1024_final_500.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_value_random100_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis/ppo_value_random100_final_500.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_rollout1024_final_500_games.csv analysis/ppo_value_random100_final_500_games.csv --output-path analysis/ppo_rollout1024_vs_value_random100_final.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_rollout1024_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis/ppo_value/ppo_rollout1024_final_500.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_value_random100_final.zip --games 500 --opponent random --max-plies 100 --seed 10000 --device cuda --output-path analysis/ppo_value/ppo_value_random100_final_500.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_value/ppo_rollout1024_final_500_games.csv analysis/ppo_value/ppo_value_random100_final_500_games.csv --output-path analysis/ppo_value/ppo_rollout1024_vs_value_random100_final.txt
 ```
 
 ### Alpha Curriculum
@@ -321,13 +321,13 @@ best checkpoint에서 시작합니다.
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_value_random100_best.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 30000 --device cuda --output-path analysis\ppo_value_random100_best_alpha_p10_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_value_random100_best.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 30000 --device cuda --output-path analysis\ppo_value\ppo_value_random100_best_alpha_p10_500.txt
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_value_random100_best.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 30000 --device cuda --output-path analysis/ppo_value_random100_best_alpha_p10_500.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_value_random100_best.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 30000 --device cuda --output-path analysis/ppo_value/ppo_value_random100_best_alpha_p10_500.txt
 ```
 
 #### 2. Alpha 10% Smoke 학습
@@ -354,17 +354,17 @@ python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_v
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_alpha_p10_initial.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis\ppo_alpha_p10_initial_500.txt
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_alpha_p10_best.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis\ppo_alpha_p10_best_500.txt
-.\.venv\Scripts\python -m chess_agent.rl.compare_full_chess_evaluations analysis\ppo_alpha_p10_initial_500_games.csv analysis\ppo_alpha_p10_best_500_games.csv --output-path analysis\ppo_alpha_p10_initial_vs_best.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_alpha_p10_initial.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis\ppo_alpha_p10\ppo_alpha_p10_initial_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_alpha_p10_best.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis\ppo_alpha_p10\ppo_alpha_p10_best_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.compare_full_chess_evaluations analysis\ppo_alpha_p10\ppo_alpha_p10_initial_500_games.csv analysis\ppo_alpha_p10\ppo_alpha_p10_best_500_games.csv --output-path analysis\ppo_alpha_p10\ppo_alpha_p10_initial_vs_best.txt
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p10_initial.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis/ppo_alpha_p10_initial_500.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p10_best.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis/ppo_alpha_p10_best_500.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_alpha_p10_initial_500_games.csv analysis/ppo_alpha_p10_best_500_games.csv --output-path analysis/ppo_alpha_p10_initial_vs_best.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p10_initial.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis/ppo_alpha_p10/ppo_alpha_p10_initial_500.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p10_best.zip --games 500 --opponent alpha-random --alpha-move-probability 0.10 --opponent-depth 1 --max-plies 100 --seed 40000 --device cuda --output-path analysis/ppo_alpha_p10/ppo_alpha_p10_best_500.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_alpha_p10/ppo_alpha_p10_initial_500_games.csv analysis/ppo_alpha_p10/ppo_alpha_p10_best_500_games.csv --output-path analysis/ppo_alpha_p10/ppo_alpha_p10_initial_vs_best.txt
 ```
 
 score rate와 평균 reward가 유지되거나 개선되고 승리·무승부·패배가 모두 충분히
@@ -424,12 +424,12 @@ seed 0 학습에서는 `beta=0.01`의 첫 4,096 timestep checkpoint만 시작 �
 Linux:
 
 ```bash
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_initial.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 60000 --device cuda --output-path analysis/ppo_p25_terminalfix_initial_seed60000_1000.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta0_seed0_checkpoints/full_chess_ppo_28672.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 60000 --device cuda --output-path analysis/ppo_p25_terminalfix_beta0_step28672_seed60000_1000.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_best.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 60000 --device cuda --output-path analysis/ppo_p25_terminalfix_beta001_best_seed60000_1000.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_initial_seed60000_1000_games.csv analysis/ppo_p25_terminalfix_beta0_step28672_seed60000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_initial_vs_beta0_step28672_seed60000.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_initial_seed60000_1000_games.csv analysis/ppo_p25_terminalfix_beta001_best_seed60000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_initial_vs_beta001_best_seed60000.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_beta0_step28672_seed60000_1000_games.csv analysis/ppo_p25_terminalfix_beta001_best_seed60000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_beta0_vs_beta001_step28672_seed60000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_initial.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 60000 --device cuda --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_initial_seed60000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta0_seed0_checkpoints/full_chess_ppo_28672.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 60000 --device cuda --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_beta0_step28672_seed60000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_best.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 60000 --device cuda --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_beta001_best_seed60000_1000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_reward_shaping/ppo_p25_terminalfix_initial_seed60000_1000_games.csv analysis/ppo_reward_shaping/ppo_p25_terminalfix_beta0_step28672_seed60000_1000_games.csv --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_initial_vs_beta0_step28672_seed60000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_reward_shaping/ppo_p25_terminalfix_initial_seed60000_1000_games.csv analysis/ppo_reward_shaping/ppo_p25_terminalfix_beta001_best_seed60000_1000_games.csv --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_initial_vs_beta001_best_seed60000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_reward_shaping/ppo_p25_terminalfix_beta0_step28672_seed60000_1000_games.csv analysis/ppo_reward_shaping/ppo_p25_terminalfix_beta001_best_seed60000_1000_games.csv --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_beta0_vs_beta001_step28672_seed60000.txt
 ```
 
 `beta=0.01`이 시작 모델과 같은 step의 `beta=0`보다 모두 높고, checkmate는 늘면서
@@ -468,22 +468,22 @@ python -m chess_agent.rl.report_experiment analysis/experiments
 학습과 checkpoint 선택에 사용하지 않은 같은 대국 seed 80,000에서 평가합니다.
 
 ```bash
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_initial.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_p25_terminalfix_seedfix_initial_seed80000_1000.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta0_seed1_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_p25_terminalfix_seedfix_beta0_seed1_final_seed80000_1000.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed1_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_p25_terminalfix_seedfix_beta001_seed1_final_seed80000_1000.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta0_seed2_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_p25_terminalfix_seedfix_beta0_seed2_final_seed80000_1000.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed2_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_p25_terminalfix_seedfix_beta001_seed2_final_seed80000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_initial.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_initial_seed80000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta0_seed1_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta0_seed1_final_seed80000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed1_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta001_seed1_final_seed80000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta0_seed2_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta0_seed2_final_seed80000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed2_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta001_seed2_final_seed80000_1000.txt
 ```
 
 같은 대국끼리 paired 비교합니다.
 
 ```bash
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta0_seed1_final_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_initial_vs_beta0_seed1_seed80000.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta001_seed1_final_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_initial_vs_beta001_seed1_seed80000.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_beta0_seed1_final_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta001_seed1_final_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_beta0_vs_beta001_seed1_seed80000.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta0_seed2_final_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_initial_vs_beta0_seed2_seed80000.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta001_seed2_final_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_initial_vs_beta001_seed2_seed80000.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_beta0_seed2_final_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta001_seed2_final_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_beta0_vs_beta001_seed2_seed80000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta0_seed1_final_seed80000_1000_games.csv --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_initial_vs_beta0_seed1_seed80000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta001_seed1_final_seed80000_1000_games.csv --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_initial_vs_beta001_seed1_seed80000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta0_seed1_final_seed80000_1000_games.csv analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta001_seed1_final_seed80000_1000_games.csv --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta0_vs_beta001_seed1_seed80000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta0_seed2_final_seed80000_1000_games.csv --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_initial_vs_beta0_seed2_seed80000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta001_seed2_final_seed80000_1000_games.csv --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_initial_vs_beta001_seed2_seed80000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta0_seed2_final_seed80000_1000_games.csv analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta001_seed2_final_seed80000_1000_games.csv --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta0_vs_beta001_seed2_seed80000.txt
 ```
 
 수정 후 독립 평가에서 seed 1은 `beta=0.01 - beta=0`이 +1.40%p였지만 95% 신뢰구간이
@@ -496,11 +496,11 @@ python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_termina
 버그의 영향을 받지 않았으므로 다시 학습할 필요는 없습니다.
 
 ```bash
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta0_seed0_checkpoints/full_chess_ppo_28672.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_p25_terminalfix_seedfix_beta0_seed0_step28672_seed80000_1000.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_checkpoints/full_chess_ppo_28672.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_p25_terminalfix_seedfix_beta001_seed0_step28672_seed80000_1000.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta0_seed0_step28672_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_initial_vs_beta0_seed0_seed80000.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta001_seed0_step28672_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_initial_vs_beta001_seed0_seed80000.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_terminalfix_seedfix_beta0_seed0_step28672_seed80000_1000_games.csv analysis/ppo_p25_terminalfix_seedfix_beta001_seed0_step28672_seed80000_1000_games.csv --output-path analysis/ppo_p25_terminalfix_seedfix_beta0_vs_beta001_seed0_seed80000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta0_seed0_checkpoints/full_chess_ppo_28672.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta0_seed0_step28672_seed80000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_checkpoints/full_chess_ppo_28672.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 80000 --device cuda --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta001_seed0_step28672_seed80000_1000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta0_seed0_step28672_seed80000_1000_games.csv --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_initial_vs_beta0_seed0_seed80000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_initial_seed80000_1000_games.csv analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta001_seed0_step28672_seed80000_1000_games.csv --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_initial_vs_beta001_seed0_seed80000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta0_seed0_step28672_seed80000_1000_games.csv analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta001_seed0_step28672_seed80000_1000_games.csv --output-path analysis/ppo_reward_shaping/ppo_p25_terminalfix_seedfix_beta0_vs_beta001_seed0_seed80000.txt
 ```
 
 동일한 seed 80,000 평가에서 seed 0의 `beta=0.01 - beta=0`은 +0.35%p였고 95%
@@ -547,12 +547,12 @@ python -m chess_agent.rl.report_experiment analysis/experiments
 - `correct probability`: 정답 수에 배정한 평균 확률
 
 ```bash
-python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_checkpoints/full_chess_ppo_28672.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/policy_drift_entropy001_seed0.txt
-python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed1_final.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/policy_drift_entropy001_seed1.txt
-python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed2_final.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/policy_drift_entropy001_seed2.txt
-python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed0_final.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/policy_drift_entropy0_seed0.txt
-python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed1_final.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/policy_drift_entropy0_seed1.txt
-python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed2_final.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/policy_drift_entropy0_seed2.txt
+python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_checkpoints/full_chess_ppo_28672.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/ppo_entropy/policy_drift_entropy001_seed0.txt
+python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed1_final.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/ppo_entropy/policy_drift_entropy001_seed1.txt
+python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed2_final.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/ppo_entropy/policy_drift_entropy001_seed2.txt
+python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed0_final.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/ppo_entropy/policy_drift_entropy0_seed0.txt
+python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed1_final.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/ppo_entropy/policy_drift_entropy0_seed1.txt
+python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip --candidate-model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed2_final.zip --puzzles-file data/puzzle_processed/tactical_valid.txt --puzzles all --batch-size 256 --device cuda --output-path analysis/ppo_entropy/policy_drift_entropy0_seed2.txt
 ```
 
 #### 독립 대국 평가
@@ -561,16 +561,16 @@ python -m chess_agent.rl.evaluate_policy_drift --reference-model-path tmp/full_c
 `seed=90000`의 1,000판으로 `entropy=0.01`과 `entropy=0`을 다시 평가합니다.
 
 ```bash
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_initial.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_p25_entropy_initial_seed90000_1000.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_checkpoints/full_chess_ppo_28672.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_p25_entropy001_seed0_seed90000_1000.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed1_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_p25_entropy001_seed1_seed90000_1000.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed2_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_p25_entropy001_seed2_seed90000_1000.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed0_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_p25_entropy0_seed0_seed90000_1000.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed1_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_p25_entropy0_seed1_seed90000_1000.txt
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed2_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_p25_entropy0_seed2_seed90000_1000.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_entropy001_seed0_seed90000_1000_games.csv analysis/ppo_p25_entropy0_seed0_seed90000_1000_games.csv --output-path analysis/ppo_p25_entropy001_vs_entropy0_seed0_seed90000.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_entropy001_seed1_seed90000_1000_games.csv analysis/ppo_p25_entropy0_seed1_seed90000_1000_games.csv --output-path analysis/ppo_p25_entropy001_vs_entropy0_seed1_seed90000.txt
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_p25_entropy001_seed2_seed90000_1000_games.csv analysis/ppo_p25_entropy0_seed2_seed90000_1000_games.csv --output-path analysis/ppo_p25_entropy001_vs_entropy0_seed2_seed90000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_initial.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_entropy/ppo_p25_entropy_initial_seed90000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_beta001_seed0_checkpoints/full_chess_ppo_28672.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_entropy/ppo_p25_entropy001_seed0_seed90000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed1_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_entropy/ppo_p25_entropy001_seed1_seed90000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_terminalfix_seedfix_beta001_seed2_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_entropy/ppo_p25_entropy001_seed2_seed90000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed0_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_entropy/ppo_p25_entropy0_seed0_seed90000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed1_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_entropy/ppo_p25_entropy0_seed1_seed90000_1000.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_alpha_p25_entropy0_beta001_seed2_final.zip --games 1000 --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 --max-plies 100 --seed 90000 --device cuda --output-path analysis/ppo_entropy/ppo_p25_entropy0_seed2_seed90000_1000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_entropy/ppo_p25_entropy001_seed0_seed90000_1000_games.csv analysis/ppo_entropy/ppo_p25_entropy0_seed0_seed90000_1000_games.csv --output-path analysis/ppo_entropy/ppo_p25_entropy001_vs_entropy0_seed0_seed90000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_entropy/ppo_p25_entropy001_seed1_seed90000_1000_games.csv analysis/ppo_entropy/ppo_p25_entropy0_seed1_seed90000_1000_games.csv --output-path analysis/ppo_entropy/ppo_p25_entropy001_vs_entropy0_seed1_seed90000.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_entropy/ppo_p25_entropy001_seed2_seed90000_1000_games.csv analysis/ppo_entropy/ppo_p25_entropy0_seed2_seed90000_1000_games.csv --output-path analysis/ppo_entropy/ppo_p25_entropy001_vs_entropy0_seed2_seed90000.txt
 ```
 
 `entropy=0`이 3개 seed 중 적어도 2개에서 독립 대국 점수를 높이고, 동시에 KL/entropy
@@ -808,13 +808,13 @@ python -m chess_agent.rl.train_full_chess_ppo --resume-from tmp/full_chess_ppo_r
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_ab_lr3e5_initial.zip --games 500 --opponent random --max-plies 100 --seed 0 --device cuda --output-path analysis\ppo_ab_lr3e5_initial_500.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp\full_chess_ppo_ab_lr3e5_initial.zip --games 500 --opponent random --max-plies 100 --seed 0 --device cuda --output-path analysis\ppo_baseline\ppo_ab_lr3e5_initial_500.txt
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_ab_lr3e5_initial.zip --games 500 --opponent random --max-plies 100 --seed 0 --device cuda --output-path analysis/ppo_ab_lr3e5_initial_500.txt
+python -m chess_agent.rl.evaluate_full_chess_ppo --model-path tmp/full_chess_ppo_ab_lr3e5_initial.zip --games 500 --opponent random --max-plies 100 --seed 0 --device cuda --output-path analysis/ppo_baseline/ppo_ab_lr3e5_initial_500.txt
 ```
 
 best와 final도 모델 경로와 출력 이름만 바꾸고 같은 `--games`, `--seed`, `--max-plies`로
@@ -823,13 +823,13 @@ best와 final도 모델 경로와 출력 이름만 바꾸고 같은 `--games`, `
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.compare_full_chess_evaluations analysis\ppo_ab_lr3e5_initial_500_games.csv analysis\ppo_ab_lr3e5_best_500_games.csv --output-path analysis\ppo_ab_lr3e5_initial_vs_best.txt
+.\.venv\Scripts\python -m chess_agent.rl.compare_full_chess_evaluations analysis\ppo_baseline\ppo_ab_lr3e5_initial_500_games.csv analysis\ppo_baseline\ppo_ab_lr3e5_best_500_games.csv --output-path analysis\ppo_baseline\ppo_ab_lr3e5_initial_vs_best.txt
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_ab_lr3e5_initial_500_games.csv analysis/ppo_ab_lr3e5_best_500_games.csv --output-path analysis/ppo_ab_lr3e5_initial_vs_best.txt
+python -m chess_agent.rl.compare_full_chess_evaluations analysis/ppo_baseline/ppo_ab_lr3e5_initial_500_games.csv analysis/ppo_baseline/ppo_ab_lr3e5_best_500_games.csv --output-path analysis/ppo_baseline/ppo_ab_lr3e5_initial_vs_best.txt
 ```
 
 비교 보고서의 `Score delta`와 95% 신뢰구간은 두 번째 모델에서 첫 번째 모델을 뺀
@@ -1026,13 +1026,13 @@ python -m chess_agent.rl.train_tactical_supervised --puzzles-file data/puzzle_pr
 Windows 평가:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp\tactical_supervised_cnn_targeted_best.pt --puzzles-file data\puzzle_processed\tactical_valid.txt --episodes all --device cuda --output-path analysis\tactical_evaluation_cnn_targeted.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp\tactical_supervised_cnn_targeted_best.pt --puzzles-file data\puzzle_processed\tactical_valid.txt --episodes all --device cuda --output-path analysis\tactical\tactical_evaluation_cnn_targeted.txt
 ```
 
 Linux 평가:
 
 ```bash
-python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp/tactical_supervised_cnn_targeted_best.pt --puzzles-file data/puzzle_processed/tactical_valid.txt --episodes all --device cuda --output-path analysis/tactical_evaluation_cnn_targeted.txt
+python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp/tactical_supervised_cnn_targeted_best.pt --puzzles-file data/puzzle_processed/tactical_valid.txt --episodes all --device cuda --output-path analysis/tactical/tactical_evaluation_cnn_targeted.txt
 ```
 
 기본 프로필은 `quietMove=3`, `defensiveMove=3`, `trappedPiece=2.5`, `discoveredCheck=2.5`, `bishopEndgame=2`, `queenEndgame=2`, `advancedPawn=1.5`, `capturingDefender=1.5`, `promotion=1.5`입니다.
@@ -1058,13 +1058,13 @@ python -m chess_agent.rl.train_tactical_supervised --puzzles-file data/puzzle_pr
 Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp\tactical_supervised_cnn_best.pt --puzzles-file data\puzzle_processed\tactical_valid.txt --episodes all --device cuda --output-path analysis\tactical_evaluation_cnn.txt
+.\.venv\Scripts\python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp\tactical_supervised_cnn_best.pt --puzzles-file data\puzzle_processed\tactical_valid.txt --episodes all --device cuda --output-path analysis\tactical\tactical_evaluation_cnn.txt
 ```
 
 Linux:
 
 ```bash
-python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp/tactical_supervised_cnn_best.pt --puzzles-file data/puzzle_processed/tactical_valid.txt --episodes all --device cuda --output-path analysis/tactical_evaluation_cnn.txt
+python -m chess_agent.rl.evaluate_tactical --agent policy --model-path tmp/tactical_supervised_cnn_best.pt --puzzles-file data/puzzle_processed/tactical_valid.txt --episodes all --device cuda --output-path analysis/tactical/tactical_evaluation_cnn.txt
 ```
 
 `--episodes all`은 validation 파일의 각 퍼즐을 정확히 한 번씩 평가합니다.
