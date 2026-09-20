@@ -1,0 +1,28 @@
+Full-chess paired evaluation comparison
+A: analysis/ppo_p25_entropy_initial_seed90000_1000_games.csv
+B: analysis/ppo_p25_entropy001_seed2_seed90000_1000_games.csv
+Paired games: 1000
+
+Aggregate results
+Model        W/D/L       Score   Avg plies
+A       351/623/ 26      66.2%        77.5
+B       327/651/ 22      65.2%        78.0
+
+Paired change (B - A)
+Score delta:       -1.00%
+95% CI:            [-3.04%, +1.04%]
+Improved/same/worse: 195/587/218
+Mean ply delta:    +0.52
+Sign-test p-value: 0.2790
+
+Outcome transitions
+A -> B             Games
+draw  -> draw       434
+draw  -> loss        13
+draw  -> win        176
+loss  -> draw        14
+loss  -> loss         7
+loss  -> win          5
+win   -> draw       203
+win   -> loss         2
+win   -> win        146
