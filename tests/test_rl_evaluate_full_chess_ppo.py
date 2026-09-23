@@ -4,6 +4,7 @@ from pathlib import Path
 from chess_agent.rl.evaluate_full_chess_ppo import (
     default_games_output_path,
     format_full_chess_report,
+    load_game_results_csv,
     save_game_results_csv,
     save_report,
 )
@@ -66,3 +67,6 @@ def test_full_chess_evaluation_report_can_be_saved(tmp_path: Path) -> None:
     assert [row["seed"] for row in rows] == ["100", "101"]
     assert [row["score"] for row in rows] == ["1.0", "0.5"]
     assert rows[1]["termination"] == "max_plies"
+
+    loaded = load_game_results_csv(games_path)
+    assert loaded == result

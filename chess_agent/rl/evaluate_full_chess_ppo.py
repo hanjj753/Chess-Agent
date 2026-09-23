@@ -6,6 +6,7 @@ from pathlib import Path
 from chess_agent.rl.observations import OBSERVATION_CHANNELS
 from chess_agent.rl.train_full_chess_ppo import (
     PPO_OPPONENTS,
+    FullChessGameEvaluation,
     FullChessEvaluationResult,
     TrackedMaskablePPO,
     evaluate_full_chess_ppo,
@@ -118,6 +119,32 @@ def save_game_results_csv(
                 }
             )
     return output_path
+
+
+def load_game_results_csv(path: str | Path) -> FullChessEvaluationResult:
+    games: list[FullChessGameEvaluation] = []
+    with Path(path).open(encoding="utf-8", newline="") as source:
+        for raw in csv.DictReader(source):
+            illegal_action = raw["illegal_action"].strip().lower()
+            if illegal_action not in {"true", "false"}:
+                raise ValueError(
+                    "illegal_action must be True or False in evaluation CSV: "
+                    f"{raw['illegal_action']!r}"
+                )
+            games.append(
+                FullChessGameEvaluation(
+                    episode=int(raw["episode"]),
+                    result=raw["result"],
+                    reward=float(raw["reward"]),
+                    plies=int(raw["plies"]),
+                    agent_color=raw["agent_color"],
+                    termination=raw["termination"],
+                    illegal_action=illegal_action == "true",
+                )
+            )
+    if not games:
+        raise ValueError(f"evaluation CSV is empty: {path}")
+    return FullChessEvaluationResult(games=tuple(games))
 
 
 def default_games_output_path(report_path: str | Path) -> Path:

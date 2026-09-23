@@ -580,6 +580,181 @@ drift가 줄며 tactical 정답 확률이 유지되면 현재 `0.01`이 큰 값�
 auxiliary loss입니다. 반대로 `entropy=0`이 더 나쁘면 탐험 보너스가 필요하다는 뜻이므로
 역시 `0.001`처럼 더 작은 양수를 시험합니다.
 
+### 학습 Horizon 100/200 paired 확인 실험
+
+`max_plies=100` 평가는 실제로 이길 게임을 너무 일찍 무승부로 처리했습니다. 평가를
+200 ply로 늘리자 제한 종료가 약 80% 줄고 점수가 모든 모델에서 약 5%p 상승했습니다.
+200-ply 학습은 seed 0/1/2 평균으로 기존 100-ply 학습보다 +0.78%p였지만 차이가
+-2.00/+2.70/+1.65%p로 불안정했습니다. Seed 3/4/5에서는 같은 시작 모델과 같은 seed를
+사용하고 `max_plies`만 바꾼 두 모델을 각각 학습합니다.
+
+```bash
+for seed in 3 4 5; do
+  for horizon in 100 200; do
+    python -m chess_agent.rl.train_full_chess_ppo \
+      --resume-from tmp/full_chess_ppo_alpha_p25_initial.zip \
+      --additional-timesteps 4096 \
+      --opponent alpha-random \
+      --alpha-move-probability 0.25 \
+      --opponent-depth 1 \
+      --reward-shaping-coefficient 0.01 \
+      --reward-shaping-scale 600 \
+      --entropy-coefficient 0.01 \
+      --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 \
+      --learning-rate 0.00003 --target-kl 0.03 \
+      --max-plies "$horizon" \
+      --evaluation-every 4096 --evaluation-games 300 \
+      --checkpoint-every 4096 \
+      --seed "$seed" --device cuda \
+      --initial-model-path "tmp/full_chess_ppo_alpha_p25_h${horizon}_confirm_seed${seed}_initial.zip" \
+      --save-path "tmp/full_chess_ppo_alpha_p25_h${horizon}_confirm_seed${seed}_final.zip" \
+      --best-model-path "tmp/full_chess_ppo_alpha_p25_h${horizon}_confirm_seed${seed}_best.zip" \
+      --checkpoint-dir "tmp/full_chess_ppo_alpha_p25_h${horizon}_confirm_seed${seed}_checkpoints" \
+      --experiment-dir analysis/experiments \
+      --experiment-name "ppo_alpha_p25_h${horizon}_confirm_seed${seed}"
+  done
+done
+
+python -m chess_agent.rl.report_experiment analysis/experiments
+```
+
+학습 중 평가에 사용하지 않은 `seed=93000`의 동일한 1,000판에서 모든 모델을 200 ply로
+평가합니다.
+
+```bash
+mkdir -p analysis/ppo_horizon
+
+common_args=(
+  --games 1000
+  --opponent alpha-random
+  --alpha-move-probability 0.25
+  --opponent-depth 1
+  --max-plies 200
+  --seed 93000
+  --device cuda
+)
+
+python -m chess_agent.rl.evaluate_full_chess_ppo \
+  --model-path tmp/full_chess_ppo_alpha_p25_initial.zip \
+  "${common_args[@]}" \
+  --output-path analysis/ppo_horizon/ppo_p25_confirm_initial_seed93000_1000.txt
+
+for seed in 3 4 5; do
+  for horizon in 100 200; do
+    python -m chess_agent.rl.evaluate_full_chess_ppo \
+      --model-path "tmp/full_chess_ppo_alpha_p25_h${horizon}_confirm_seed${seed}_final.zip" \
+      "${common_args[@]}" \
+      --output-path "analysis/ppo_horizon/ppo_p25_h${horizon}train_seed${seed}_h200eval_seed93000_1000.txt"
+  done
+done
+```
+
+각 seed에서 100-ply 학습을 A, 200-ply 학습을 B로 두고 paired 비교합니다. 보고서의
+`Score delta`가 `B - A`입니다.
+
+```bash
+for seed in 3 4 5; do
+  python -m chess_agent.rl.compare_full_chess_evaluations \
+    "analysis/ppo_horizon/ppo_p25_h100train_seed${seed}_h200eval_seed93000_1000_games.csv" \
+    "analysis/ppo_horizon/ppo_p25_h200train_seed${seed}_h200eval_seed93000_1000_games.csv" \
+    --output-path "analysis/ppo_horizon/ppo_p25_h100train_vs_h200train_seed${seed}_seed93000.txt"
+
+  python -m chess_agent.rl.compare_full_chess_evaluations \
+    analysis/ppo_horizon/ppo_p25_confirm_initial_seed93000_1000_games.csv \
+    "analysis/ppo_horizon/ppo_p25_h200train_seed${seed}_h200eval_seed93000_1000_games.csv" \
+    --output-path "analysis/ppo_horizon/ppo_p25_confirm_initial_vs_h200train_seed${seed}_seed93000.txt"
+done
+```
+
+6개 seed를 합치면 200-ply 학습은 100-ply 학습보다 평균 `+0.57%p`였지만, 개선된
+seed가 3/6개뿐이고 seed 단위 95% 신뢰구간도 0을 포함했습니다. 따라서 200 ply가
+학습 성능을 높인다고 결론 내릴 수는 없습니다. 다만 조기 무승부를 크게 줄여 환경의
+승패가 더 정확해지므로 이후 학습과 평가는 `max_plies=200`으로 고정합니다.
+
+### 200-ply 장기 학습 곡선 실험
+
+짧은 4,096 timestep만으로는 seed 변동과 실제 학습 추세를 구분하기 어렵습니다.
+동일한 초기 모델에서 seed 0/1/2를 각각 16,384 timestep 학습하고, 4,096 timestep마다
+checkpoint를 저장합니다. 한 rollout은 `4 envs * 256 steps = 1,024 transitions`이므로
+checkpoint 하나는 rollout 4개 간격이고 전체 학습은 rollout 16개입니다.
+
+```bash
+for seed in 0 1 2; do
+  python -m chess_agent.rl.train_full_chess_ppo \
+    --resume-from tmp/full_chess_ppo_alpha_p25_initial.zip \
+    --additional-timesteps 16384 \
+    --opponent alpha-random \
+    --alpha-move-probability 0.25 \
+    --opponent-depth 1 \
+    --reward-shaping-coefficient 0.01 \
+    --reward-shaping-scale 600 \
+    --entropy-coefficient 0.01 \
+    --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 \
+    --learning-rate 0.00003 --target-kl 0.03 \
+    --max-plies 200 \
+    --evaluation-every 4096 --evaluation-games 300 \
+    --checkpoint-every 4096 \
+    --seed "$seed" --device cuda \
+    --initial-model-path "tmp/full_chess_ppo_alpha_p25_h200_long_seed${seed}_initial.zip" \
+    --save-path "tmp/full_chess_ppo_alpha_p25_h200_long_seed${seed}_final.zip" \
+    --best-model-path "tmp/full_chess_ppo_alpha_p25_h200_long_seed${seed}_best.zip" \
+    --checkpoint-dir "tmp/full_chess_ppo_alpha_p25_h200_long_seed${seed}_checkpoints" \
+    --experiment-dir analysis/experiments \
+    --experiment-name "ppo_alpha_p25_h200_long_seed${seed}"
+done
+
+python -m chess_agent.rl.report_experiment analysis/experiments
+```
+
+학습 중 300판 평가는 진행 확인과 best 모델 선택용입니다. 학습이 끝난 뒤에는 학습에
+사용하지 않은 동일한 `seed=94000`의 1,000판으로 초기 모델을 한 번 평가합니다.
+
+```bash
+mkdir -p analysis/ppo_learning_curve
+
+python -m chess_agent.rl.evaluate_full_chess_ppo \
+  --model-path tmp/full_chess_ppo_alpha_p25_initial.zip \
+  --games 1000 \
+  --opponent alpha-random \
+  --alpha-move-probability 0.25 \
+  --opponent-depth 1 \
+  --max-plies 200 \
+  --seed 94000 \
+  --device cuda \
+  --output-path analysis/ppo_learning_curve/initial_seed94000_1000.txt
+```
+
+이어서 각 seed의 checkpoint 전체를 같은 1,000판으로 평가합니다. 초기 모델의
+`games.csv`를 세 실험이 공유하므로 동일한 기준 대국을 중복 실행하지 않습니다.
+
+```bash
+for seed in 0 1 2; do
+  python -m chess_agent.rl.evaluate_checkpoint_series \
+    --baseline-games-csv analysis/ppo_learning_curve/initial_seed94000_1000_games.csv \
+    --checkpoint-dir "tmp/full_chess_ppo_alpha_p25_h200_long_seed${seed}_checkpoints" \
+    --games 1000 \
+    --opponent alpha-random \
+    --alpha-move-probability 0.25 \
+    --opponent-depth 1 \
+    --max-plies 200 \
+    --seed 94000 \
+    --device cuda \
+    --output-dir "analysis/ppo_learning_curve/seed${seed}"
+done
+```
+
+각 `seedN` 폴더에는 다음 결과가 생성됩니다.
+
+- `checkpoint_00004096.txt`, `_games.csv`: 해당 checkpoint의 상세 평가
+- `checkpoint_00004096_vs_baseline.txt`: 초기 모델과의 paired 비교 및 신뢰구간
+- `checkpoint_curve.txt`: 모든 step의 점수와 초기 모델 대비 변화 요약
+- `checkpoint_curve.csv`: 발표용 표와 그래프를 만들 수 있는 구조화된 학습 곡선
+
+평가가 중간에 중단되어도 같은 명령을 다시 실행하면 완성된 `_games.csv`는 재사용합니다.
+설정이나 모델이 바뀌어 강제로 다시 평가하려면 `--force`를 추가합니다. 세 seed에서
+점수가 공통으로 상승하는 구간이 있는지, 이후 다시 하락하는지, critic의 explained
+variance가 함께 좋아지는지를 보고 다음 학습 길이와 best checkpoint를 정합니다.
+
 best checkpoint 선택용 평가는 shaping을 사용하지 않고 실제 승·무·패만 사용합니다.
 `games.csv`의 `reward`와 `extrinsic_reward`도 실제 대국 결과를 유지하고,
 `shaping_reward`, `training_reward`에 학습용 reward를 별도로 기록합니다. 자동 보고서의
