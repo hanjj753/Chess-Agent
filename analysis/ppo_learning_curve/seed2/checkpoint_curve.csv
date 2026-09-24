@@ -1,0 +1,6 @@
+step,model_path,wins,draws,losses,score_rate,score_delta,ci_low,ci_high,average_reward,average_plies,max_plies_terminations,checkmates,illegal_actions
+0,analysis/ppo_learning_curve/initial_seed94000_1000_games.csv,447,522,31,0.708,0.0,0.0,0.0,0.416,100.736,82,478,0
+28672,tmp/full_chess_ppo_alpha_p25_h200_long_seed2_checkpoints/full_chess_ppo_28672.zip,434,544,22,0.706,-0.002,-0.023792134607025776,0.01979213460702578,0.412,100.948,92,456,0
+32768,tmp/full_chess_ppo_alpha_p25_h200_long_seed2_checkpoints/full_chess_ppo_32768.zip,427,544,29,0.699,-0.009,-0.03130860157213141,0.013308601572131413,0.398,98.873,87,456,0
+36864,tmp/full_chess_ppo_alpha_p25_h200_long_seed2_checkpoints/full_chess_ppo_36864.zip,446,521,33,0.7065,-0.0015,-0.0243054345331161,0.021305434533116098,0.413,100.691,72,479,0
+40960,tmp/full_chess_ppo_alpha_p25_h200_long_seed2_checkpoints/full_chess_ppo_40960.zip,449,526,25,0.712,0.004,-0.018909425487693407,0.026909425487693407,0.424,99.949,88,474,0
