@@ -68,7 +68,7 @@ def test_series_report_and_csv_include_paired_delta(tmp_path: Path) -> None:
     save_game_results_csv(candidate_csv, result=candidate, base_seed=100)
     delta, ci_low, ci_high = paired_delta(baseline_csv, candidate_csv)
     row = CheckpointSeriesRow(
-        step=4096,
+        step=28_672,
         model_path="checkpoint_4096.zip",
         result=candidate,
         score_delta=delta,
@@ -84,18 +84,21 @@ def test_series_report_and_csv_include_paired_delta(tmp_path: Path) -> None:
         games=4,
         seed=100,
         max_plies=200,
+        baseline_step=24_576,
     )
     csv_path = save_series_csv(
         tmp_path / "curve.csv",
         baseline_path="baseline.zip",
         baseline_result=baseline,
         rows=(row,),
+        baseline_step=24_576,
     )
 
     assert delta == pytest.approx(0.125)
-    assert "4096" in report
+    assert "  4096" in report
     assert "+12.50%" in report
     with csv_path.open(encoding="utf-8", newline="") as source:
         rows = list(csv.DictReader(source))
-    assert [row["step"] for row in rows] == ["0", "4096"]
+    assert [row["absolute_step"] for row in rows] == ["24576", "28672"]
+    assert [row["added_timesteps"] for row in rows] == ["0", "4096"]
     assert float(rows[1]["score_delta"]) == pytest.approx(0.125)

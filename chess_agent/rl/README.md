@@ -42,6 +42,8 @@ Gymnasium 환경
 - `evaluate_full_chess_ppo.py`: 저장된 PPO 모델의 독립 대국 평가와 TXT 보고서
 - `compare_full_chess_evaluations.py`: 같은 seed의 두 평가 CSV를 paired 비교
 - `evaluate_policy_drift.py`: 고정 tactical position에서 사전학습/미세조정 policy 분포 비교
+- `evaluate_checkpoint_series.py`: 모든 PPO checkpoint의 독립 대국 성능 곡선 평가
+- `evaluate_policy_drift_series.py`: 모든 PPO checkpoint의 tactical policy drift 곡선 평가
 - `report_experiment.py`: 실험 로그를 한국어 TXT와 발표용 PNG로 자동 요약
 
 ## Full-Chess 환경
@@ -732,6 +734,7 @@ for seed in 0 1 2; do
   python -m chess_agent.rl.evaluate_checkpoint_series \
     --baseline-games-csv analysis/ppo_learning_curve/initial_seed94000_1000_games.csv \
     --checkpoint-dir "tmp/full_chess_ppo_alpha_p25_h200_long_seed${seed}_checkpoints" \
+    --baseline-step 24576 \
     --games 1000 \
     --opponent alpha-random \
     --alpha-move-probability 0.25 \
@@ -745,15 +748,51 @@ done
 
 각 `seedN` 폴더에는 다음 결과가 생성됩니다.
 
-- `checkpoint_00004096.txt`, `_games.csv`: 해당 checkpoint의 상세 평가
-- `checkpoint_00004096_vs_baseline.txt`: 초기 모델과의 paired 비교 및 신뢰구간
+- `checkpoint_00028672.txt`, `_games.csv`: 해당 절대 step checkpoint의 상세 평가
+- `checkpoint_00028672_vs_baseline.txt`: 초기 모델과의 paired 비교 및 신뢰구간
 - `checkpoint_curve.txt`: 모든 step의 점수와 초기 모델 대비 변화 요약
 - `checkpoint_curve.csv`: 발표용 표와 그래프를 만들 수 있는 구조화된 학습 곡선
+
+`checkpoint_curve.csv`는 기준 모델의 누적 `absolute_step=24576`과 그 이후 실제
+checkpoint step을 기록하고, 별도의 `added_timesteps` 열에 이번 단계에서 추가된
+`0/4096/8192/12288/16384`를 기록합니다.
 
 평가가 중간에 중단되어도 같은 명령을 다시 실행하면 완성된 `_games.csv`는 재사용합니다.
 설정이나 모델이 바뀌어 강제로 다시 평가하려면 `--force`를 추가합니다. 세 seed에서
 점수가 공통으로 상승하는 구간이 있는지, 이후 다시 하락하는지, critic의 explained
 variance가 함께 좋아지는지를 보고 다음 학습 길이와 best checkpoint를 정합니다.
+
+### 장기 학습 checkpoint의 policy drift
+
+16,384 timestep 장기 실험에서는 세 seed 평균이 기준 모델을 넘지 못했고, 특히
+8,192 timestep 추가 지점에서 세 seed가 모두 하락했습니다. 이것이 기존 tactical
+policy 손실과 관련 있는지 확인하기 위해 동일한 validation puzzle에서 기준 모델과
+각 checkpoint의 action distribution을 비교합니다.
+
+```bash
+for seed in 0 1 2; do
+  python -m chess_agent.rl.evaluate_policy_drift_series \
+    --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip \
+    --checkpoint-dir "tmp/full_chess_ppo_alpha_p25_h200_long_seed${seed}_checkpoints" \
+    --baseline-step 24576 \
+    --puzzles-file data/puzzle_processed/tactical_valid.txt \
+    --puzzles all \
+    --batch-size 256 \
+    --device cuda \
+    --output-dir "analysis/ppo_learning_curve/seed${seed}/policy_drift"
+done
+```
+
+각 `policy_drift` 폴더에는 checkpoint별 상세 TXT와 다음 두 요약이 생성됩니다.
+
+- `policy_drift_curve.txt`: step별 KL/JS, top-1 일치율, 전술 정확도와 정답 확률 변화
+- `policy_drift_curve.csv`: 대국 점수 곡선과 결합해 그래프를 만들 수 있는 구조화 데이터
+
+기본 실행은 큰 position별 CSV를 만들지 않습니다. 어떤 퍼즐에서 선택이 바뀌었는지까지
+조사할 때만 `--save-positions`를 추가합니다. 대국 점수 하락과 함께 tactical accuracy,
+correct probability가 계속 하락하면 reference KL 또는 supervised auxiliary loss가
+필요하다는 증거입니다. 반대로 policy drift가 작으면 다음 병목은 낮은 explained
+variance를 보이는 critic이므로 value dataset을 현재 상대 설정에 맞춰 다시 수집합니다.
 
 best checkpoint 선택용 평가는 shaping을 사용하지 않고 실제 승·무·패만 사용합니다.
 `games.csv`의 `reward`와 `extrinsic_reward`도 실제 대국 결과를 유지하고,

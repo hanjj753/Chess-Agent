@@ -143,6 +143,7 @@ def format_series_report(
     games: int,
     seed: int,
     max_plies: int,
+    baseline_step: int = 0,
 ) -> str:
     baseline_terminations = Counter(
         game.termination for game in baseline_result.games
@@ -155,9 +156,9 @@ def format_series_report(
         f"Base seed:      {seed}",
         f"Max plies:      {max_plies}",
         "",
-        "Step       W/D/L             Score    Delta (95% CI)          Avg plies  Max-ply",
+        "Absolute  Added     W/D/L             Score    Delta (95% CI)          Avg plies  Max-ply",
         (
-            f"baseline   {baseline_result.wins:4d}/"
+            f"{baseline_step:8d} {0:6d}   {baseline_result.wins:4d}/"
             f"{baseline_result.draws:4d}/{baseline_result.losses:4d}  "
             f"{baseline_result.score_rate:7.2%}  "
             f"{'-':24s}  {baseline_result.average_plies:9.1f}  "
@@ -171,7 +172,8 @@ def format_series_report(
             f"[{row.ci_low:+.2%}, {row.ci_high:+.2%}]"
         )
         lines.append(
-            f"{row.step:8d}   {row.result.wins:4d}/"
+            f"{row.step:8d} {row.step - baseline_step:6d}   "
+            f"{row.result.wins:4d}/"
             f"{row.result.draws:4d}/{row.result.losses:4d}  "
             f"{row.result.score_rate:7.2%}  {interval:24s}  "
             f"{row.result.average_plies:9.1f}  "
@@ -193,11 +195,13 @@ def save_series_csv(
     baseline_path: str | Path,
     baseline_result: FullChessEvaluationResult,
     rows: tuple[CheckpointSeriesRow, ...],
+    baseline_step: int = 0,
 ) -> Path:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = (
-        "step",
+        "absolute_step",
+        "added_timesteps",
         "model_path",
         "wins",
         "draws",
@@ -217,7 +221,8 @@ def save_series_csv(
         writer.writeheader()
         write_series_row(
             writer,
-            step=0,
+            absolute_step=baseline_step,
+            added_timesteps=0,
             model_path=str(baseline_path),
             result=baseline_result,
             score_delta=0.0,
@@ -227,7 +232,8 @@ def save_series_csv(
         for row in rows:
             write_series_row(
                 writer,
-                step=row.step,
+                absolute_step=row.step,
+                added_timesteps=row.step - baseline_step,
                 model_path=row.model_path,
                 result=row.result,
                 score_delta=row.score_delta,
@@ -240,7 +246,8 @@ def save_series_csv(
 def write_series_row(
     writer: csv.DictWriter,
     *,
-    step: int,
+    absolute_step: int,
+    added_timesteps: int,
     model_path: str,
     result: FullChessEvaluationResult,
     score_delta: float,
@@ -250,7 +257,8 @@ def write_series_row(
     terminations = Counter(game.termination for game in result.games)
     writer.writerow(
         {
-            "step": step,
+            "absolute_step": absolute_step,
+            "added_timesteps": added_timesteps,
             "model_path": model_path,
             "wins": result.wins,
             "draws": result.draws,
@@ -279,6 +287,12 @@ def main() -> None:
         default="full_chess_ppo_*.zip",
     )
     parser.add_argument("--games", type=int, default=1_000)
+    parser.add_argument(
+        "--baseline-step",
+        type=int,
+        default=0,
+        help="cumulative timesteps already present in the baseline model",
+    )
     parser.add_argument("--opponent", choices=PPO_OPPONENTS, default="random")
     parser.add_argument("--alpha-move-probability", type=float, default=0.1)
     parser.add_argument("--opponent-depth", type=int, default=1)
@@ -298,11 +312,15 @@ def main() -> None:
 
     if args.games < 1:
         parser.error("--games must be positive")
+    if args.baseline_step < 0:
+        parser.error("--baseline-step must be non-negative")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     checkpoints = discover_checkpoints(
         args.checkpoint_dir,
         pattern=args.checkpoint_pattern,
     )
+    if any(checkpoint.step <= args.baseline_step for checkpoint in checkpoints):
+        parser.error("checkpoint steps must be greater than --baseline-step")
 
     if args.baseline_games_csv is not None:
         baseline_csv = args.baseline_games_csv
@@ -430,6 +448,7 @@ def main() -> None:
         games=args.games,
         seed=args.seed,
         max_plies=args.max_plies,
+        baseline_step=args.baseline_step,
     )
     report_path = save_report(args.output_dir / "checkpoint_curve.txt", report)
     csv_path = save_series_csv(
@@ -437,6 +456,7 @@ def main() -> None:
         baseline_path=baseline_path,
         baseline_result=baseline_result,
         rows=series_rows,
+        baseline_step=args.baseline_step,
     )
     print()
     print(report, end="")
