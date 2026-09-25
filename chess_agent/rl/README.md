@@ -33,8 +33,9 @@ Gymnasium 환경
 - `policy_value.py`: 공유 CNN 위에 policy head와 value head를 둔 모델
 - `initialize_policy_value.py`: tactical CNN checkpoint를 Policy-Value 모델로 변환
 - `value_dataset.py`: full-chess value dataset의 bit-pack NPZ 저장/불러오기
-- `collect_value_dataset.py`: mixed 상대 대국에서 value train/validation 상태 수집
+- `collect_value_dataset.py`: `.pt`/PPO `.zip` policy 대국에서 value train/validation 상태 수집
 - `pretrain_value_head.py`: policy를 고정한 value head supervised 사전학습
+- `pretrain_ppo_value_head.py`: PPO actor와 공유 CNN을 고정한 critic supervised 사전학습
 - `evaluate_value_head.py`: checkpoint를 지정한 value dataset에서 독립 평가
 - `experiment_tracking.py`: 설정, 학습 지표, 대국 결과와 checkpoint 이벤트 기록
 - `ppo_policy.py`: 기존 CNN 구조를 사용하는 Stable-Baselines3 maskable policy
@@ -793,6 +794,107 @@ done
 correct probability가 계속 하락하면 reference KL 또는 supervised auxiliary loss가
 필요하다는 증거입니다. 반대로 policy drift가 작으면 다음 병목은 낮은 explained
 variance를 보이는 critic이므로 value dataset을 현재 상대 설정에 맞춰 다시 수집합니다.
+
+### P25-200 분포 PPO critic 재사전학습
+
+장기 PPO checkpoint에서 tactical policy drift가 작지만 value explained variance가
+낮다면 actor보다 critic이 병목일 가능성이 큽니다. 아래 실험은 기준 PPO actor가 현재
+학습 상대와 동일한 `alpha-random p25`, `max_plies=200` 조건에서 둔 대국을 수집하고,
+actor와 공유 CNN은 고정한 채 critic의 `value_head`와 최종 `value_net`만 supervised
+학습합니다.
+
+먼저 결과 파일을 둘 디렉터리를 만들고 10,000대국을 수집합니다. 대국 단위로 90%는
+train, 10%는 validation에 배정하므로 한 대국의 position이 두 split에 섞이지 않습니다.
+각 position의 target은 그 대국의 최종 승·무·패를 해당 시점까지의 거리만큼
+`gamma=0.995`로 할인한 값입니다.
+
+```bash
+mkdir -p data/value analysis/value
+
+python -m chess_agent.rl.collect_value_dataset \
+  --model-path tmp/full_chess_ppo_alpha_p25_initial.zip \
+  --train-output data/value/ppo_alpha_p25_h200_train.npz \
+  --validation-output data/value/ppo_alpha_p25_h200_valid.npz \
+  --games 10000 \
+  --validation-fraction 0.1 \
+  --opponent alpha-random \
+  --alpha-move-probability 0.25 \
+  --opponent-depth 1 \
+  --max-plies 200 \
+  --gamma 0.995 \
+  --deterministic-policy \
+  --seed 120000 \
+  --device cuda \
+  --log-every 100
+```
+
+학습 전 기준 critic의 validation 성능을 저장합니다. 이후 결과에서 Huber loss와 MAE는
+낮을수록 좋고, explained variance는 0보다 크면서 높을수록 좋습니다.
+
+```bash
+python -m chess_agent.rl.evaluate_value_head \
+  --model-path tmp/full_chess_ppo_alpha_p25_initial.zip \
+  --data data/value/ppo_alpha_p25_h200_valid.npz \
+  --batch-size 1024 \
+  --device cuda \
+  --output-path analysis/value/ppo_alpha_p25_h200_initial.txt
+```
+
+다음 명령은 actor와 공유 CNN을 고정하고 critic만 학습합니다. position 수가 긴 대국에
+치우치지 않도록 대국별 총 가중치를 같게 만들지만, 실제 승·무·패 비율은 그대로
+유지합니다. validation loss가 10 epoch 동안 좋아지지 않으면 조기 종료하며 가장 좋은
+checkpoint를 별도로 저장합니다.
+
+```bash
+python -m chess_agent.rl.pretrain_ppo_value_head \
+  --model-path tmp/full_chess_ppo_alpha_p25_initial.zip \
+  --train-data data/value/ppo_alpha_p25_h200_train.npz \
+  --validation-data data/value/ppo_alpha_p25_h200_valid.npz \
+  --epochs 100 \
+  --batch-size 1024 \
+  --learning-rate 0.001 \
+  --weight-decay 0.00001 \
+  --patience 10 \
+  --seed 0 \
+  --device cuda \
+  --save-path tmp/full_chess_ppo_alpha_p25_h200_value_final.zip \
+  --best-model-path tmp/full_chess_ppo_alpha_p25_h200_value_best.zip \
+  --experiment-dir analysis/experiments \
+  --experiment-name ppo_alpha_p25_h200_value_pretrain
+```
+
+best critic을 같은 validation split에서 다시 평가합니다.
+
+```bash
+python -m chess_agent.rl.evaluate_value_head \
+  --model-path tmp/full_chess_ppo_alpha_p25_h200_value_best.zip \
+  --data data/value/ppo_alpha_p25_h200_valid.npz \
+  --batch-size 1024 \
+  --device cuda \
+  --output-path analysis/value/ppo_alpha_p25_h200_value_best.txt
+```
+
+마지막으로 actor가 정말 그대로인지 고정 tactical position에서 확인합니다. critic만
+바뀌었으므로 KL과 JS divergence는 0에 가깝고, top-1 agreement는 100%, tactical
+정확도와 정답 확률은 기준 모델과 같아야 합니다.
+
+```bash
+python -m chess_agent.rl.evaluate_policy_drift \
+  --reference-model-path tmp/full_chess_ppo_alpha_p25_initial.zip \
+  --candidate-model-path tmp/full_chess_ppo_alpha_p25_h200_value_best.zip \
+  --puzzles-file data/puzzle_processed/tactical_valid.txt \
+  --puzzles all \
+  --batch-size 256 \
+  --device cuda \
+  --output-path analysis/value/ppo_alpha_p25_h200_value_policy_drift.txt
+
+python -m chess_agent.rl.report_experiment analysis/experiments
+```
+
+보고서 명령은 `analysis/experiments` 바로 아래에서 아직 완성된 보고서가 없는 실험만
+찾아 `report/summary.txt`와 학습 곡선을 생성합니다. 이 단계에서는 곧바로 PPO를 더
+학습하지 않고, initial/best의 value 지표와 policy drift를 먼저 확인해 critic
+사전학습이 실제 병목을 개선했는지 판단합니다.
 
 best checkpoint 선택용 평가는 shaping을 사용하지 않고 실제 승·무·패만 사용합니다.
 `games.csv`의 `reward`와 `extrinsic_reward`도 실제 대국 결과를 유지하고,

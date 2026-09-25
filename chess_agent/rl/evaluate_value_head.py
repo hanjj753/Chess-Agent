@@ -4,7 +4,9 @@ from pathlib import Path
 import torch
 
 from chess_agent.rl.policy_value import load_policy_value
+from chess_agent.rl.pretrain_ppo_value_head import evaluate_ppo_value_head
 from chess_agent.rl.pretrain_value_head import ValueMetrics, evaluate_value_head
+from chess_agent.rl.train_full_chess_ppo import TrackedMaskablePPO
 from chess_agent.rl.value_dataset import (
     ValueDatasetSummary,
     load_value_dataset,
@@ -23,15 +25,29 @@ def evaluate_value_checkpoint(
         raise ValueError("batch_size must be positive")
     resolved_device = resolve_device(device)
     dataset = load_value_dataset(data_path)
-    model = load_policy_value(model_path, device=resolved_device)
-    if dataset.observation_shape != (model.input_channels, 8, 8):
-        raise ValueError("value dataset observation shape does not match the model")
-    metrics = evaluate_value_head(
-        model=model,
-        dataset=dataset,
-        batch_size=batch_size,
-        device=resolved_device,
-    )
+    if Path(model_path).suffix.lower() == ".zip":
+        ppo_model = TrackedMaskablePPO.load(model_path, device=resolved_device)
+        shape = ppo_model.observation_space.shape
+        if shape is None or tuple(int(value) for value in shape) != (
+            dataset.observation_shape
+        ):
+            raise ValueError("value dataset observation shape does not match the model")
+        metrics = evaluate_ppo_value_head(
+            model=ppo_model,
+            dataset=dataset,
+            batch_size=batch_size,
+            device=resolved_device,
+        )
+    else:
+        model = load_policy_value(model_path, device=resolved_device)
+        if dataset.observation_shape != (model.input_channels, 8, 8):
+            raise ValueError("value dataset observation shape does not match the model")
+        metrics = evaluate_value_head(
+            model=model,
+            dataset=dataset,
+            batch_size=batch_size,
+            device=resolved_device,
+        )
     return metrics, summarize_value_dataset(dataset)
 
 
@@ -66,6 +82,12 @@ def build_value_evaluation_report(
         f"Prediction std: {metrics.prediction_std:.5f}",
         "",
     ]
+    if metadata.get("opponent") == "alpha-random":
+        lines.insert(
+            5,
+            "Alpha move prob:"
+            f" {float(metadata.get('alpha_move_probability', 0.0)):7.1%}",
+        )
     return "\n".join(lines)
 
 

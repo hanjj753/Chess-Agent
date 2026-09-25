@@ -14,11 +14,12 @@ from chess_agent.rl.full_chess_env import (
 )
 from chess_agent.rl.observations import OBSERVATION_CHANNELS
 from chess_agent.rl.policy_value import PolicyValueNetwork, load_policy_value
-from chess_agent.rl.train_full_chess_ppo import make_opponent
+from chess_agent.rl.train_full_chess_ppo import TrackedMaskablePPO, make_opponent
 from chess_agent.rl.value_dataset import pack_observations, save_value_dataset
 
 
-VALUE_DATASET_OPPONENTS = ("random", "alpha", "mixed")
+VALUE_DATASET_OPPONENTS = ("random", "alpha-random", "alpha", "mixed")
+CollectionPolicy = PolicyValueNetwork | TrackedMaskablePPO
 
 
 @dataclass
@@ -106,6 +107,7 @@ def collect_value_dataset(
     validation_fraction: float,
     opponent: str,
     alpha_fraction: float,
+    alpha_move_probability: float,
     opponent_depth: int,
     opponent_time_limit: float | None,
     max_plies: int,
@@ -121,6 +123,7 @@ def collect_value_dataset(
         validation_fraction=validation_fraction,
         opponent=opponent,
         alpha_fraction=alpha_fraction,
+        alpha_move_probability=alpha_move_probability,
         max_plies=max_plies,
         gamma=gamma,
         temperature=temperature,
@@ -132,9 +135,9 @@ def collect_value_dataset(
         torch.cuda.manual_seed_all(seed)
     rng = np.random.default_rng(seed)
 
-    model = load_policy_value(model_path, device=resolved_device)
+    model = load_collection_policy(model_path, device=resolved_device)
     history_length = infer_history_length(model)
-    observation_shape = (model.input_channels, 8, 8)
+    observation_shape = model_observation_shape(model)
     opponent_schedule = make_opponent_schedule(
         games=games,
         opponent=opponent,
@@ -152,6 +155,7 @@ def collect_value_dataset(
             FullChessEnv(
                 opponent=make_opponent(
                     kind,
+                    alpha_move_probability=alpha_move_probability,
                     depth=opponent_depth,
                     time_limit=opponent_time_limit,
                 ),
@@ -216,6 +220,9 @@ def collect_value_dataset(
         "validation_fraction": validation_fraction,
         "opponent": opponent,
         "alpha_fraction": alpha_fraction if opponent == "mixed" else None,
+        "alpha_move_probability": (
+            alpha_move_probability if opponent == "alpha-random" else None
+        ),
         "opponent_depth": opponent_depth,
         "opponent_time_limit": opponent_time_limit,
         "max_plies": max_plies,
@@ -256,7 +263,7 @@ def collect_value_dataset(
 @torch.no_grad()
 def select_policy_action(
     *,
-    model: PolicyValueNetwork,
+    model: CollectionPolicy,
     observation: np.ndarray,
     action_mask: np.ndarray,
     device: torch.device,
@@ -265,7 +272,15 @@ def select_policy_action(
 ) -> int:
     board = torch.as_tensor(observation, dtype=torch.float32, device=device).unsqueeze(0)
     legal_mask = torch.as_tensor(action_mask, dtype=torch.bool, device=device).unsqueeze(0)
-    logits, _ = model(board)
+    if isinstance(model, TrackedMaskablePPO):
+        model.policy.set_training_mode(False)
+        distribution = model.policy.get_distribution(
+            board,
+            action_masks=legal_mask,
+        )
+        logits = distribution.distribution.logits
+    else:
+        logits, _ = model(board)
     masked_logits = (logits / temperature).masked_fill(~legal_mask, -torch.inf)
     if deterministic:
         return int(torch.argmax(masked_logits, dim=-1).item())
@@ -273,10 +288,31 @@ def select_policy_action(
     return int(torch.multinomial(probabilities, num_samples=1).item())
 
 
-def infer_history_length(model: PolicyValueNetwork) -> int:
-    if model.input_channels % OBSERVATION_CHANNELS != 0:
+def load_collection_policy(
+    path: str | Path,
+    *,
+    device: torch.device,
+) -> CollectionPolicy:
+    model_path = Path(path)
+    if model_path.suffix.lower() == ".zip":
+        return TrackedMaskablePPO.load(model_path, device=device)
+    return load_policy_value(model_path, device=device)
+
+
+def model_observation_shape(model: CollectionPolicy) -> tuple[int, int, int]:
+    if isinstance(model, TrackedMaskablePPO):
+        shape = model.observation_space.shape
+        if shape is None or len(shape) != 3:
+            raise ValueError("PPO model does not use a board observation")
+        return tuple(int(value) for value in shape)
+    return model.input_channels, 8, 8
+
+
+def infer_history_length(model: CollectionPolicy) -> int:
+    input_channels = model_observation_shape(model)[0]
+    if input_channels % OBSERVATION_CHANNELS != 0:
         raise ValueError("policy-value input channels must be a multiple of 18")
-    return model.input_channels // OBSERVATION_CHANNELS - 1
+    return input_channels // OBSERVATION_CHANNELS - 1
 
 
 def make_opponent_schedule(
@@ -318,6 +354,7 @@ def validate_collection_options(
     validation_fraction: float,
     opponent: str,
     alpha_fraction: float,
+    alpha_move_probability: float,
     max_plies: int,
     gamma: float,
     temperature: float,
@@ -331,6 +368,8 @@ def validate_collection_options(
         raise ValueError(f"unsupported opponent: {opponent}")
     if not 0 <= alpha_fraction <= 1:
         raise ValueError("alpha_fraction must be in [0, 1]")
+    if not 0 <= alpha_move_probability <= 1:
+        raise ValueError("alpha_move_probability must be in [0, 1]")
     if max_plies < 1:
         raise ValueError("max_plies must be positive")
     if not 0 < gamma <= 1:
@@ -356,6 +395,12 @@ def main() -> None:
     parser.add_argument("--validation-fraction", type=float, default=0.1)
     parser.add_argument("--opponent", choices=VALUE_DATASET_OPPONENTS, default="mixed")
     parser.add_argument("--alpha-fraction", type=float, default=0.5)
+    parser.add_argument(
+        "--alpha-move-probability",
+        type=float,
+        default=0.1,
+        help="probability of an alpha move for the alpha-random opponent",
+    )
     parser.add_argument("--opponent-depth", type=int, default=1)
     parser.add_argument("--opponent-time-limit", type=float)
     parser.add_argument("--max-plies", type=int, default=200)
@@ -375,6 +420,7 @@ def main() -> None:
         validation_fraction=args.validation_fraction,
         opponent=args.opponent,
         alpha_fraction=args.alpha_fraction,
+        alpha_move_probability=args.alpha_move_probability,
         opponent_depth=args.opponent_depth,
         opponent_time_limit=args.opponent_time_limit,
         max_plies=args.max_plies,

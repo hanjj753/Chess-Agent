@@ -1,6 +1,8 @@
+import math
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
 from chess_agent.rl.collect_value_dataset import collect_value_dataset
@@ -13,12 +15,23 @@ from chess_agent.rl.policy_value import (
     load_policy_value,
     save_policy_value,
 )
+from chess_agent.rl.ppo_policy import ChessMaskableActorCriticPolicy
+from chess_agent.rl.pretrain_ppo_value_head import (
+    PPOValuePretrainingConfig,
+    pretrain_ppo_value_head,
+)
 from chess_agent.rl.pretrain_value_head import (
     ValuePretrainingConfig,
     make_sample_weights,
     pretrain_value_head,
 )
 from chess_agent.rl.report_experiment import generate_experiment_report
+from chess_agent.rl.train_full_chess_ppo import (
+    FullChessPPOConfig,
+    TrackedMaskablePPO,
+    make_vector_env,
+    save_ppo_model,
+)
 from chess_agent.rl.value_dataset import (
     load_value_dataset,
     pack_observations,
@@ -73,6 +86,7 @@ def test_collect_value_dataset_splits_whole_games(tmp_path: Path) -> None:
         validation_fraction=0.25,
         opponent="random",
         alpha_fraction=0.0,
+        alpha_move_probability=0.1,
         opponent_depth=1,
         opponent_time_limit=None,
         max_plies=2,
@@ -93,6 +107,39 @@ def test_collect_value_dataset_splits_whole_games(tmp_path: Path) -> None:
     assert train.observation_shape == (18, 8, 8)
     assert train.metadata["max_plies_mode"] == "terminal_draw"
     assert validation.metadata["max_plies_mode"] == "terminal_draw"
+
+
+def test_collect_value_dataset_supports_ppo_and_alpha_random(
+    tmp_path: Path,
+) -> None:
+    model_path = make_smoke_ppo(tmp_path / "source.zip")
+
+    result = collect_value_dataset(
+        model_path=model_path,
+        train_output_path=tmp_path / "train.npz",
+        validation_output_path=tmp_path / "validation.npz",
+        games=4,
+        validation_fraction=0.25,
+        opponent="alpha-random",
+        alpha_fraction=0.0,
+        alpha_move_probability=0.25,
+        opponent_depth=1,
+        opponent_time_limit=None,
+        max_plies=2,
+        gamma=0.995,
+        deterministic_policy=True,
+        temperature=1.0,
+        seed=0,
+        device="cpu",
+        log_every=0,
+    )
+    train = load_value_dataset(result.train_path)
+
+    assert result.train_games == 3
+    assert result.validation_games == 1
+    assert train.metadata["source_model"] == str(model_path)
+    assert train.metadata["opponent"] == "alpha-random"
+    assert train.metadata["alpha_move_probability"] == pytest.approx(0.25)
 
 
 def test_value_pretraining_changes_only_value_head(tmp_path: Path) -> None:
@@ -163,6 +210,76 @@ def test_value_pretraining_changes_only_value_head(tmp_path: Path) -> None:
 
     loaded = load_policy_value(result.final_model_path)
     assert loaded.input_channels == 18
+
+
+def test_ppo_value_pretraining_changes_only_critic(tmp_path: Path) -> None:
+    model_path = make_smoke_ppo(tmp_path / "source.zip")
+    source = TrackedMaskablePPO.load(model_path, device="cpu")
+    frozen_before = {
+        name: value.clone()
+        for name, value in source.policy.state_dict().items()
+        if not name.startswith("mlp_extractor.value_head.")
+        and not name.startswith("value_net.")
+    }
+    critic_before = {
+        name: value.clone()
+        for name, value in source.policy.state_dict().items()
+        if name.startswith("mlp_extractor.value_head.")
+        or name.startswith("value_net.")
+    }
+    train_path = tmp_path / "train.npz"
+    validation_path = tmp_path / "validation.npz"
+    make_synthetic_dataset(train_path, game_offset=0, games=6)
+    make_synthetic_dataset(validation_path, game_offset=100, games=3)
+
+    model, result = pretrain_ppo_value_head(
+        PPOValuePretrainingConfig(
+            model_path=model_path,
+            train_data_path=train_path,
+            validation_data_path=validation_path,
+            epochs=2,
+            batch_size=4,
+            learning_rate=1e-2,
+            patience=0,
+            device="cpu",
+            save_path=tmp_path / "final.zip",
+            best_model_path=tmp_path / "best.zip",
+            experiment_dir=tmp_path / "experiments",
+        )
+    )
+
+    current = model.policy.state_dict()
+    for name, expected in frozen_before.items():
+        torch.testing.assert_close(current[name], expected)
+    assert any(
+        not torch.equal(current[name], expected)
+        for name, expected in critic_before.items()
+    )
+    assert all(parameter.requires_grad for parameter in model.policy.parameters())
+    assert result.final_model_path.is_file()
+    assert result.best_model_path.is_file()
+    loaded = TrackedMaskablePPO.load(result.final_model_path, device="cpu")
+    assert loaded.num_timesteps == source.num_timesteps
+    best_loaded = TrackedMaskablePPO.load(result.best_model_path, device="cpu")
+    assert all(
+        parameter.requires_grad for parameter in best_loaded.policy.parameters()
+    )
+    metrics, summary = evaluate_value_checkpoint(
+        model_path=result.final_model_path,
+        data_path=validation_path,
+        batch_size=4,
+        device="cpu",
+    )
+    assert math.isfinite(metrics.explained_variance)
+    assert summary.games == 3
+
+    report = generate_experiment_report(
+        result.experiment_run_dir,
+        create_plots=False,
+    )
+    report_text = report.summary_path.read_text(encoding="utf-8")
+    assert "Value-head supervised pretraining 보고서" in report_text
+    assert "source.zip" in report_text
 
 
 def test_value_sample_weights_balance_games_and_outcomes(tmp_path: Path) -> None:
@@ -241,3 +358,39 @@ def make_synthetic_dataset(path: Path, *, game_offset: int, games: int) -> None:
             "gamma": 0.995,
         },
     )
+
+
+def make_smoke_ppo(path: Path) -> Path:
+    config = FullChessPPOConfig(
+        total_timesteps=0,
+        n_envs=1,
+        n_steps=2,
+        batch_size=2,
+        n_epochs=1,
+        history_length=0,
+        max_plies=2,
+        hidden_size=8,
+        residual_blocks=1,
+        evaluation_every=0,
+        checkpoint_every=0,
+        device="cpu",
+        experiment_dir=None,
+    )
+    env = make_vector_env(config)
+    try:
+        model = TrackedMaskablePPO(
+            ChessMaskableActorCriticPolicy,
+            env,
+            n_steps=2,
+            batch_size=2,
+            n_epochs=1,
+            policy_kwargs={
+                "hidden_size": 8,
+                "dropout": 0.0,
+                "residual_blocks": 1,
+            },
+            device="cpu",
+        )
+        return save_ppo_model(model, path)
+    finally:
+        env.close()
