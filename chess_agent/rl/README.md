@@ -896,6 +896,125 @@ python -m chess_agent.rl.report_experiment analysis/experiments
 학습하지 않고, initial/best의 value 지표와 policy drift를 먼저 확인해 critic
 사전학습이 실제 병목을 개선했는지 판단합니다.
 
+### Critic 사전학습 A/B PPO 실험
+
+Critic 사전학습 전후 모델은 actor가 같으므로 동일한 seed의 PPO를 각각 8,192
+timestep 학습하면 critic 초기화가 후속 학습에 주는 영향을 비교할 수 있습니다.
+사전학습 checkpoint는 변경된 critic에 오래된 Adam 통계를 적용하지 않도록 optimizer
+state가 비어 있습니다. 공정한 비교를 위해 기준 모델에도 `--reset-optimizer-state`를
+적용합니다. 이 옵션은 가중치와 누적 timestep은 유지하고 Adam moment만 초기화합니다.
+
+먼저 기준 모델 분기를 seed 0/1/2로 학습합니다.
+
+```bash
+for seed in 0 1 2; do
+  python -m chess_agent.rl.train_full_chess_ppo \
+    --resume-from tmp/full_chess_ppo_alpha_p25_initial.zip \
+    --reset-optimizer-state \
+    --additional-timesteps 8192 \
+    --opponent alpha-random \
+    --alpha-move-probability 0.25 \
+    --opponent-depth 1 \
+    --reward-shaping-coefficient 0.01 \
+    --reward-shaping-scale 600 \
+    --entropy-coefficient 0.01 \
+    --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 \
+    --learning-rate 0.00003 --target-kl 0.03 \
+    --max-plies 200 \
+    --evaluation-every 4096 --evaluation-games 300 \
+    --checkpoint-every 4096 \
+    --seed "$seed" --device cuda \
+    --initial-model-path "tmp/ppo_value_ab_baseline_seed${seed}_initial.zip" \
+    --save-path "tmp/ppo_value_ab_baseline_seed${seed}_final.zip" \
+    --best-model-path "tmp/ppo_value_ab_baseline_seed${seed}_best.zip" \
+    --checkpoint-dir "tmp/ppo_value_ab_baseline_seed${seed}_checkpoints" \
+    --experiment-dir analysis/experiments \
+    --experiment-name "ppo_value_ab_baseline_seed${seed}"
+done
+```
+
+동일한 설정으로 critic 사전학습 best checkpoint 분기를 학습합니다.
+
+```bash
+for seed in 0 1 2; do
+  python -m chess_agent.rl.train_full_chess_ppo \
+    --resume-from tmp/full_chess_ppo_alpha_p25_h200_value_best.zip \
+    --reset-optimizer-state \
+    --additional-timesteps 8192 \
+    --opponent alpha-random \
+    --alpha-move-probability 0.25 \
+    --opponent-depth 1 \
+    --reward-shaping-coefficient 0.01 \
+    --reward-shaping-scale 600 \
+    --entropy-coefficient 0.01 \
+    --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 \
+    --learning-rate 0.00003 --target-kl 0.03 \
+    --max-plies 200 \
+    --evaluation-every 4096 --evaluation-games 300 \
+    --checkpoint-every 4096 \
+    --seed "$seed" --device cuda \
+    --initial-model-path "tmp/ppo_value_ab_critic_seed${seed}_initial.zip" \
+    --save-path "tmp/ppo_value_ab_critic_seed${seed}_final.zip" \
+    --best-model-path "tmp/ppo_value_ab_critic_seed${seed}_best.zip" \
+    --checkpoint-dir "tmp/ppo_value_ab_critic_seed${seed}_checkpoints" \
+    --experiment-dir analysis/experiments \
+    --experiment-name "ppo_value_ab_critic_seed${seed}"
+done
+```
+
+학습 중 300판 평가는 진행 확인용입니다. 최종 비교는 두 분기의 모든 checkpoint를
+학습에 사용하지 않은 같은 1,000대국에 놓고 수행합니다. 기준 actor는 두 출발점에서
+완전히 같으므로 초기 평가 CSV 하나를 공유합니다.
+
+```bash
+mkdir -p analysis/ppo_value_ab
+
+python -m chess_agent.rl.evaluate_full_chess_ppo \
+  --model-path tmp/full_chess_ppo_alpha_p25_initial.zip \
+  --games 1000 \
+  --opponent alpha-random \
+  --alpha-move-probability 0.25 \
+  --opponent-depth 1 \
+  --max-plies 200 \
+  --seed 95000 \
+  --device cuda \
+  --output-path analysis/ppo_value_ab/initial_seed95000_1000.txt
+
+for branch in baseline critic; do
+  for seed in 0 1 2; do
+    python -m chess_agent.rl.evaluate_checkpoint_series \
+      --baseline-games-csv analysis/ppo_value_ab/initial_seed95000_1000_games.csv \
+      --checkpoint-dir "tmp/ppo_value_ab_${branch}_seed${seed}_checkpoints" \
+      --baseline-step 24576 \
+      --games 1000 \
+      --opponent alpha-random \
+      --alpha-move-probability 0.25 \
+      --opponent-depth 1 \
+      --max-plies 200 \
+      --seed 95000 \
+      --device cuda \
+      --output-dir "analysis/ppo_value_ab/${branch}_seed${seed}"
+  done
+done
+```
+
+마지막으로 같은 seed와 checkpoint step끼리 직접 paired 비교하고 실험 보고서를
+생성합니다. 양수 score-rate difference가 세 seed에서 반복되면 critic 사전학습이
+실제 PPO 학습에 도움이 된다는 근거가 됩니다.
+
+```bash
+for seed in 0 1 2; do
+  for step in 28672 32768; do
+    python -m chess_agent.rl.compare_full_chess_evaluations \
+      "analysis/ppo_value_ab/baseline_seed${seed}/checkpoint_$(printf '%08d' "$step")_games.csv" \
+      "analysis/ppo_value_ab/critic_seed${seed}/checkpoint_$(printf '%08d' "$step")_games.csv" \
+      --output-path "analysis/ppo_value_ab/baseline_vs_critic_seed${seed}_step${step}.txt"
+  done
+done
+
+python -m chess_agent.rl.report_experiment analysis/experiments
+```
+
 best checkpoint 선택용 평가는 shaping을 사용하지 않고 실제 승·무·패만 사용합니다.
 `games.csv`의 `reward`와 `extrinsic_reward`도 실제 대국 결과를 유지하고,
 `shaping_reward`, `training_reward`에 학습용 reward를 별도로 기록합니다. 자동 보고서의

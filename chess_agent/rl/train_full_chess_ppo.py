@@ -68,6 +68,7 @@ class FullChessPPOConfig:
     device: str = "auto"
     pretrained_policy_value_path: Path | None = None
     resume_from: Path | None = None
+    reset_optimizer_state: bool = False
     save_path: Path = Path("tmp/full_chess_ppo_final.zip")
     checkpoint_dir: Path = Path("tmp/full_chess_ppo_checkpoints")
     initial_model_path: Path = Path("tmp/full_chess_ppo_initial.zip")
@@ -401,6 +402,9 @@ def train_full_chess_ppo(
             # instead use its explicitly configured seed for RNGs and env resets.
             model.seed = config.seed
             model.set_random_seed(config.seed)
+            if config.reset_optimizer_state:
+                model.policy.optimizer.state.clear()
+                print("Optimizer state reset for resumed training.", flush=True)
             print(
                 f"Resume seed: checkpoint={checkpoint_seed} "
                 f"stage={config.seed}",
@@ -895,6 +899,11 @@ def main() -> None:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--pretrained-policy-value", type=Path)
     parser.add_argument("--resume-from", type=Path)
+    parser.add_argument(
+        "--reset-optimizer-state",
+        action="store_true",
+        help="discard Adam moments restored from a resume checkpoint",
+    )
     parser.add_argument("--save-path", type=Path, default=Path("tmp/full_chess_ppo_final.zip"))
     parser.add_argument(
         "--checkpoint-dir",
@@ -955,6 +964,7 @@ def main() -> None:
             device=args.device,
             pretrained_policy_value_path=args.pretrained_policy_value,
             resume_from=args.resume_from,
+            reset_optimizer_state=args.reset_optimizer_state,
             save_path=args.save_path,
             checkpoint_dir=args.checkpoint_dir,
             initial_model_path=args.initial_model_path,

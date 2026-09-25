@@ -376,6 +376,34 @@ def test_full_chess_ppo_resume_overrides_stage_settings(tmp_path: Path) -> None:
     assert model.get_env()._seeds == [stage_seed]
 
 
+def test_full_chess_ppo_can_reset_optimizer_state_when_resuming(
+    tmp_path: Path,
+) -> None:
+    first_model, first = train_full_chess_ppo(
+        smoke_config(
+            total_timesteps=2,
+            save_path=tmp_path / "first.zip",
+            initial_model_path=tmp_path / "first_initial.zip",
+            best_model_path=tmp_path / "first_best.zip",
+        )
+    )
+    assert first_model.policy.optimizer.state
+
+    resumed_model, resumed = train_full_chess_ppo(
+        smoke_config(
+            additional_timesteps=0,
+            resume_from=first.final_model_path,
+            reset_optimizer_state=True,
+            save_path=tmp_path / "resumed.zip",
+            initial_model_path=tmp_path / "resumed_initial.zip",
+            best_model_path=tmp_path / "resumed_best.zip",
+        )
+    )
+
+    assert resumed.trained_timesteps == 0
+    assert not resumed_model.policy.optimizer.state
+
+
 def smoke_config(**overrides: object) -> FullChessPPOConfig:
     values = {
         "total_timesteps": 0,
