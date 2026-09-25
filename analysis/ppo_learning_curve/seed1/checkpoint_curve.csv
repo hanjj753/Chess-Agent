@@ -1,6 +1,6 @@
-step,model_path,wins,draws,losses,score_rate,score_delta,ci_low,ci_high,average_reward,average_plies,max_plies_terminations,checkmates,illegal_actions
-0,analysis/ppo_learning_curve/initial_seed94000_1000_games.csv,447,522,31,0.708,0.0,0.0,0.0,0.416,100.736,82,478,0
-28672,tmp/full_chess_ppo_alpha_p25_h200_long_seed1_checkpoints/full_chess_ppo_28672.zip,443,528,29,0.707,-0.001,-0.022836469261073085,0.020836469261073083,0.414,102.764,83,472,0
-32768,tmp/full_chess_ppo_alpha_p25_h200_long_seed1_checkpoints/full_chess_ppo_32768.zip,415,554,31,0.692,-0.016,-0.038422509211043246,0.006422509211043245,0.384,101.807,78,446,0
-36864,tmp/full_chess_ppo_alpha_p25_h200_long_seed1_checkpoints/full_chess_ppo_36864.zip,451,523,26,0.7125,0.0045,-0.01800687821905044,0.027006878219050443,0.425,100.101,90,477,0
-40960,tmp/full_chess_ppo_alpha_p25_h200_long_seed1_checkpoints/full_chess_ppo_40960.zip,439,526,35,0.702,-0.006,-0.029893727474226632,0.017893727474226635,0.404,101.763,78,474,0
+absolute_step,added_timesteps,model_path,wins,draws,losses,score_rate,score_delta,ci_low,ci_high,average_reward,average_plies,max_plies_terminations,checkmates,illegal_actions
+24576,0,analysis/ppo_learning_curve/initial_seed94000_1000_games.csv,447,522,31,0.708,0.0,0.0,0.0,0.416,100.736,82,478,0
+28672,4096,tmp/full_chess_ppo_alpha_p25_h200_long_seed1_checkpoints/full_chess_ppo_28672.zip,443,528,29,0.707,-0.001,-0.022836469261073085,0.020836469261073083,0.414,102.764,83,472,0
+32768,8192,tmp/full_chess_ppo_alpha_p25_h200_long_seed1_checkpoints/full_chess_ppo_32768.zip,415,554,31,0.692,-0.016,-0.038422509211043246,0.006422509211043245,0.384,101.807,78,446,0
+36864,12288,tmp/full_chess_ppo_alpha_p25_h200_long_seed1_checkpoints/full_chess_ppo_36864.zip,451,523,26,0.7125,0.0045,-0.01800687821905044,0.027006878219050443,0.425,100.101,90,477,0
+40960,16384,tmp/full_chess_ppo_alpha_p25_h200_long_seed1_checkpoints/full_chess_ppo_40960.zip,439,526,35,0.702,-0.006,-0.029893727474226632,0.017893727474226635,0.404,101.763,78,474,0

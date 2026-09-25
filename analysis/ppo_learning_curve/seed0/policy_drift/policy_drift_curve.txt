@@ -1,0 +1,16 @@
+PPO checkpoint policy drift curve
+Reference:       tmp/full_chess_ppo_alpha_p25_initial.zip
+Puzzles file:    data/puzzle_processed/tactical_valid.txt
+Puzzles:         20190
+Agent positions: 48341
+Baseline step:   24576
+
+Absolute  Added       KL       JS     Agree   Accuracy  Acc delta  Correct P  P delta  Ent delta
+   24576      0  0.000000 0.000000   100.0%     74.4%      +0.0%      68.9%    +0.0%    +0.0000
+   28672   4096  0.002304 0.000573    98.3%     74.4%      -0.0%      69.0%    +0.0%    -0.0033
+   32768   8192  0.007934 0.001965    97.1%     74.4%      -0.0%      68.9%    -0.0%    +0.0000
+   36864  12288  0.014538 0.003613    96.0%     74.2%      -0.2%      68.5%    -0.4%    +0.0148
+   40960  16384  0.011940 0.002959    96.3%     74.3%      -0.1%      68.7%    -0.2%    +0.0054
+
+KL/JS and agreement compare each checkpoint with the fixed reference.
+Negative accuracy or correct-probability deltas indicate tactical retention loss.
