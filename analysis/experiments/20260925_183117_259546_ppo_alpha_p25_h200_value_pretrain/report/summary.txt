@@ -1,0 +1,47 @@
+Value-head supervised pretraining 보고서
+=======================================
+실험 이름:       ppo_alpha_p25_h200_value_pretrain
+실험 폴더:       analysis/experiments/20260925_183117_259546_ppo_alpha_p25_h200_value_pretrain
+source model:    tmp/full_chess_ppo_alpha_p25_initial.zip
+train data:      data/value/ppo_alpha_p25_h200_train.npz
+validation data: data/value/ppo_alpha_p25_h200_valid.npz
+완료 epoch:      15
+목표 epoch:      100
+batch size:      1,024
+learning rate:   0.001
+대국 균형:       True
+승무패 균형:     False
+소요 시간:       1m 32s
+
+데이터셋
+--------
+train      positions=  453,003 games= 9,000 W/D/L=3,941/4,746/313
+validation positions=   50,600 games= 1,000 W/D/L=435/527/38
+수집 조건:       opponent=alpha-random, max_plies=200, gamma=0.995
+
+학습 지표
+---------
+train_loss                       initial=  0.11907 min=  0.11396 max=  0.11907 last=  0.11396
+validation_loss                  initial=  0.09556 min=  0.09348 max=  0.09826 last=  0.09619
+validation_mae                   initial=  0.34856 min=  0.34856 max=  0.38304 last=  0.37364
+validation_rmse                  initial=  0.43880 min=  0.43422 max=  0.44587 last=  0.44078
+validation_explained_variance    initial=  0.03039 min=  0.03039 max=  0.06308 last=  0.04719
+validation_target_std            initial=  0.44558 min=  0.44558 max=  0.44558 last=  0.44558
+validation_prediction_std        initial=  0.16833 min=  0.16054 max=  0.18677 last=  0.17956
+
+Best checkpoint
+---------------
+epoch:            5
+path:             tmp/full_chess_ppo_alpha_p25_h200_value_best.zip
+validation loss:  0.09348
+
+해석과 주의사항
+----------------
+- value 예측이 target 차이를 양의 explained variance로 설명하기 시작했습니다.
+
+빠르게 볼 항목
+--------------
+1. validation loss와 MAE가 감소하는가?
+2. explained variance가 0보다 높아지는가?
+3. prediction std가 0에 머물지 않고 target std에 가까워지는가?
+4. best epoch 이후 validation 성능이 악화되어 과적합하지 않는가?

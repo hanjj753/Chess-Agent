@@ -1,0 +1,91 @@
+{
+  "completed_at": "2026-09-25T09:32:50+00:00",
+  "summary": {
+    "best_epoch": 5,
+    "best_model_path": "tmp/full_chess_ppo_alpha_p25_h200_value_best.zip",
+    "best_validation": {
+      "explained_variance": 0.06058712673494637,
+      "loss": 0.09347563281753635,
+      "mae": 0.36474883706658606,
+      "prediction_std": 0.16637820627471103,
+      "rmse": 0.4342249652611076,
+      "target_std": 0.4455824138017169
+    },
+    "completed_epochs": 15,
+    "experiment_run_dir": "analysis/experiments/20260925_183117_259546_ppo_alpha_p25_h200_value_pretrain",
+    "final_model_path": "tmp/full_chess_ppo_alpha_p25_h200_value_final.zip",
+    "final_validation": {
+      "explained_variance": 0.04718568515570465,
+      "loss": 0.09618657672040222,
+      "mae": 0.37364177504429236,
+      "prediction_std": 0.17956440920813244,
+      "rmse": 0.4407763903323803,
+      "target_std": 0.4455824138017169
+    },
+    "initial_validation": {
+      "explained_variance": 0.03039105898853056,
+      "loss": 0.09556088154937827,
+      "mae": 0.3485619806652896,
+      "prediction_std": 0.1683291381319374,
+      "rmse": 0.43880233920160583,
+      "target_std": 0.4455824138017169
+    },
+    "stopped_early": true,
+    "train_dataset": {
+      "draws": 4746,
+      "games": 9000,
+      "losses": 313,
+      "metadata": {
+        "alpha_fraction": null,
+        "alpha_move_probability": 0.25,
+        "deterministic_policy": true,
+        "games": 10000,
+        "gamma": 0.995,
+        "history_length": 4,
+        "max_plies": 200,
+        "max_plies_mode": "terminal_draw",
+        "opponent": "alpha-random",
+        "opponent_depth": 1,
+        "opponent_time_limit": null,
+        "seed": 120000,
+        "source_model": "tmp/full_chess_ppo_alpha_p25_initial.zip",
+        "split": "train",
+        "temperature": 1.0,
+        "validation_fraction": 0.1,
+        "version": 1
+      },
+      "positions": 453003,
+      "target_mean": 0.2571568489074707,
+      "target_std": 0.4481070935726166,
+      "wins": 3941
+    },
+    "validation_dataset": {
+      "draws": 527,
+      "games": 1000,
+      "losses": 38,
+      "metadata": {
+        "alpha_fraction": null,
+        "alpha_move_probability": 0.25,
+        "deterministic_policy": true,
+        "games": 10000,
+        "gamma": 0.995,
+        "history_length": 4,
+        "max_plies": 200,
+        "max_plies_mode": "terminal_draw",
+        "opponent": "alpha-random",
+        "opponent_depth": 1,
+        "opponent_time_limit": null,
+        "seed": 120000,
+        "source_model": "tmp/full_chess_ppo_alpha_p25_initial.zip",
+        "split": "validation",
+        "temperature": 1.0,
+        "validation_fraction": 0.1,
+        "version": 1
+      },
+      "positions": 50600,
+      "target_mean": 0.2517315447330475,
+      "target_std": 0.44558241963386536,
+      "wins": 435
+    }
+  }
+}

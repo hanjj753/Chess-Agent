@@ -1,0 +1,1 @@
+timestamp,step,phase,episode,result,reward,extrinsic_reward,shaping_reward,training_reward,plies,agent_color,opponent,termination,checkpoint

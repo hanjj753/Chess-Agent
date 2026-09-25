@@ -1,0 +1,21 @@
+Value-head dataset evaluation
+=============================
+Model:          tmp/full_chess_ppo_alpha_p25_h200_value_best.zip
+Dataset:        data/value/ppo_alpha_p25_h200_valid.npz
+Opponent:       alpha-random
+Alpha move prob:   25.0%
+Max plies:      200
+Gamma:          0.995
+Positions:      50600
+Games:          1000
+W/D/L:          435/527/38
+Target mean:    0.25173
+Target std:     0.44558
+
+Metrics
+-------
+Huber loss:     0.09348
+MAE:            0.36475
+RMSE:           0.43422
+Explained var:  0.06059
+Prediction std: 0.16638
