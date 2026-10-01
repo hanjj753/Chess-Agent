@@ -1073,6 +1073,101 @@ done
 같은 세 학습 seed를 새 대국에서 평가하는 단계이므로, 학습 seed 자체의 변동을
 알아보려면 이후 별도 학습 seed를 추가해야 합니다.
 
+### Critic A/B 학습 seed 3~5 확장
+
+두 평가 대국 묶음에서 critic 분기는 평균적으로 기준 분기보다 높았지만 seed 2의
+우열은 뒤집혔습니다. 같은 설정으로 학습 seed 3/4/5를 추가합니다. 두 분기 모두
+`--reset-optimizer-state`를 사용하고, checkpoint의 누적 24,576 timestep에서
+8,192 timestep을 더 학습합니다. 학습 중 300판 평가는 진행 확인용입니다.
+
+```bash
+for branch in baseline critic; do
+  if [ "$branch" = baseline ]; then
+    source_model=tmp/full_chess_ppo_alpha_p25_initial.zip
+  else
+    source_model=tmp/full_chess_ppo_alpha_p25_h200_value_best.zip
+  fi
+
+  for seed in 3 4 5; do
+    python -m chess_agent.rl.train_full_chess_ppo \
+      --resume-from "$source_model" --reset-optimizer-state \
+      --additional-timesteps 8192 \
+      --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 \
+      --reward-shaping-coefficient 0.01 --reward-shaping-scale 600 \
+      --entropy-coefficient 0.01 \
+      --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 \
+      --learning-rate 0.00003 --target-kl 0.03 --max-plies 200 \
+      --evaluation-every 4096 --evaluation-games 300 --checkpoint-every 4096 \
+      --seed "$seed" --device cuda \
+      --initial-model-path "tmp/ppo_value_ab_${branch}_seed${seed}_initial.zip" \
+      --save-path "tmp/ppo_value_ab_${branch}_seed${seed}_final.zip" \
+      --best-model-path "tmp/ppo_value_ab_${branch}_seed${seed}_best.zip" \
+      --checkpoint-dir "tmp/ppo_value_ab_${branch}_seed${seed}_checkpoints" \
+      --experiment-dir analysis/experiments \
+      --experiment-name "ppo_value_ab_${branch}_seed${seed}"
+  done
+done
+```
+
+새 여섯 실험의 학습 곡선과 설명 보고서를 생성합니다. 기존에 완성된 보고서는
+건너뜁니다.
+
+```bash
+python -m chess_agent.rl.report_experiment analysis/experiments
+```
+
+이제 학습 seed 0~5의 두 분기, 총 12개 `32,768` checkpoint를 아직 사용하지 않은
+평가 seed `97000~97999`에서 확인합니다. 먼저 공통 초기 actor를 한 번 평가합니다.
+`--output-path`를 주면 대국별 `_games.csv`도 함께 저장됩니다.
+
+```bash
+mkdir -p analysis/ppo_value_ab/confirm_seed97000
+
+python -m chess_agent.rl.evaluate_full_chess_ppo \
+  --model-path tmp/full_chess_ppo_alpha_p25_initial.zip \
+  --games 1000 --opponent alpha-random --alpha-move-probability 0.25 \
+  --opponent-depth 1 --max-plies 200 --seed 97000 --device cuda \
+  --output-path analysis/ppo_value_ab/confirm_seed97000/initial_1000.txt
+```
+
+다음 루프는 12개 checkpoint 각각의 TXT와 대국별 CSV를 저장합니다. 학습 중
+300판에서 고른 `*_best.zip` 대신 같은 학습량의 checkpoint를 비교합니다.
+
+```bash
+for branch in baseline critic; do
+  for seed in 0 1 2 3 4 5; do
+    python -m chess_agent.rl.evaluate_full_chess_ppo \
+      --model-path "tmp/ppo_value_ab_${branch}_seed${seed}_checkpoints/full_chess_ppo_32768.zip" \
+      --games 1000 --opponent alpha-random --alpha-move-probability 0.25 \
+      --opponent-depth 1 --max-plies 200 --seed 97000 --device cuda \
+      --output-path "analysis/ppo_value_ab/confirm_seed97000/${branch}_seed${seed}_step32768_1000.txt"
+  done
+done
+```
+
+마지막으로 학습 seed별로 critic의 상대적 이득과 두 분기의 초기 actor 대비 변화를
+같은 평가 대국끼리 짝지어 비교합니다. `Score delta (B - A)`가 양수면 두 번째
+모델의 점수가 높습니다.
+
+```bash
+for seed in 0 1 2 3 4 5; do
+  python -m chess_agent.rl.compare_full_chess_evaluations \
+    "analysis/ppo_value_ab/confirm_seed97000/baseline_seed${seed}_step32768_1000_games.csv" \
+    "analysis/ppo_value_ab/confirm_seed97000/critic_seed${seed}_step32768_1000_games.csv" \
+    --output-path "analysis/ppo_value_ab/confirm_seed97000/baseline_vs_critic_seed${seed}.txt"
+
+  for branch in baseline critic; do
+    python -m chess_agent.rl.compare_full_chess_evaluations \
+      analysis/ppo_value_ab/confirm_seed97000/initial_1000_games.csv \
+      "analysis/ppo_value_ab/confirm_seed97000/${branch}_seed${seed}_step32768_1000_games.csv" \
+      --output-path "analysis/ppo_value_ab/confirm_seed97000/initial_vs_${branch}_seed${seed}.txt"
+  done
+done
+```
+
+새 평가에서 여섯 학습 seed의 방향과 초기 actor 대비 점수를 함께 봅니다.
+이 평가 seed는 모델을 선택하는 데 사용하지 않은 최종 확인용입니다.
+
 best checkpoint 선택용 평가는 shaping을 사용하지 않고 실제 승·무·패만 사용합니다.
 `games.csv`의 `reward`와 `extrinsic_reward`도 실제 대국 결과를 유지하고,
 `shaping_reward`, `training_reward`에 학습용 reward를 별도로 기록합니다. 자동 보고서의
