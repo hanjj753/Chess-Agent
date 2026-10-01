@@ -1,0 +1,14 @@
+Full-chess PPO checkpoint learning curve
+Baseline:       analysis/ppo_value_ab/initial_seed95000_1000_games.csv
+Opponent:       alpha-random
+Games/model:    1000
+Base seed:      95000
+Max plies:      200
+
+Absolute  Added     W/D/L             Score    Delta (95% CI)          Avg plies  Max-ply
+   24576      0    415/ 550/  35   69.00%  -                             100.8       79
+   28672   4096    380/ 595/  25   67.75%  -1.25% [-3.45%, +0.95%]       104.2       76
+   32768   8192    404/ 563/  33   68.55%  -0.45% [-2.76%, +1.86%]       107.2      104
+
+Delta and confidence intervals are paired against the baseline
+using identical game seeds and agent colors.
