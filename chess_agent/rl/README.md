@@ -1168,6 +1168,71 @@ done
 새 평가에서 여섯 학습 seed의 방향과 초기 actor 대비 점수를 함께 봅니다.
 이 평가 seed는 모델을 선택하는 데 사용하지 않은 최종 확인용입니다.
 
+### 학습 seed 3~5의 기존 평가 대국 재확인
+
+`seed=97000` 평가에서는 critic 사전학습의 점수 차이가 학습 seed에 따라
+엇갈렸습니다. 이것이 학습 결과의 차이인지 1,000판 평가 표본의 우연인지
+구분하기 위해, 새로 학습한 seed 3/4/5 모델을 기존 평가 seed `95000`과
+`96000`에서도 확인합니다. 공통 initial actor와 seed 0/1/2 모델은 이미 같은
+대국에서 평가했으므로 다시 실행하지 않습니다.
+
+다음 명령은 두 평가 대국 묶음에서 baseline/critic 각 세 모델, 총 12번의
+1,000판 평가를 실행합니다. 두 분기를 공정하게 비교하기 위해 같은
+`--seed`, 상대 설정, 색 순서와 절대 step `32768`을 사용합니다.
+
+```bash
+for eval_seed in 95000 96000; do
+  output_dir="analysis/ppo_value_ab/confirm_seed${eval_seed}"
+  mkdir -p "$output_dir"
+
+  for branch in baseline critic; do
+    for train_seed in 3 4 5; do
+      python -m chess_agent.rl.evaluate_full_chess_ppo \
+        --model-path "tmp/ppo_value_ab_${branch}_seed${train_seed}_checkpoints/full_chess_ppo_32768.zip" \
+        --games 1000 --opponent alpha-random --alpha-move-probability 0.25 \
+        --opponent-depth 1 --max-plies 200 --seed "$eval_seed" --device cuda \
+        --output-path "$output_dir/${branch}_seed${train_seed}_step32768_1000.txt"
+    done
+  done
+done
+```
+
+다음 명령은 같은 평가 대국끼리 `baseline -> critic`과
+`initial -> baseline/critic`을 비교합니다. `95000`의 initial CSV는 최초
+실험의 출력 위치에 있고, `96000`의 initial CSV는 확인용 폴더에 있으므로
+평가 seed에 따라 경로만 선택합니다. 출력의 `Score delta (B - A)`가 양수면
+두 번째 모델의 점수가 높습니다.
+
+```bash
+for eval_seed in 95000 96000; do
+  output_dir="analysis/ppo_value_ab/confirm_seed${eval_seed}"
+
+  if [ "$eval_seed" -eq 95000 ]; then
+    initial_games="analysis/ppo_value_ab/initial_seed95000_1000_games.csv"
+  else
+    initial_games="$output_dir/initial_1000_games.csv"
+  fi
+
+  for train_seed in 3 4 5; do
+    python -m chess_agent.rl.compare_full_chess_evaluations \
+      "$output_dir/baseline_seed${train_seed}_step32768_1000_games.csv" \
+      "$output_dir/critic_seed${train_seed}_step32768_1000_games.csv" \
+      --output-path "$output_dir/baseline_vs_critic_seed${train_seed}.txt"
+
+    for branch in baseline critic; do
+      python -m chess_agent.rl.compare_full_chess_evaluations \
+        "$initial_games" \
+        "$output_dir/${branch}_seed${train_seed}_step32768_1000_games.csv" \
+        --output-path "$output_dir/initial_vs_${branch}_seed${train_seed}.txt"
+    done
+  done
+done
+```
+
+완료 후 `confirm_seed95000`, `confirm_seed96000`, `confirm_seed97000`의 결과를
+함께 사용하면 각 학습 seed의 점수를 세 평가 묶음, 총 3,000판 기준으로 평균낼
+수 있습니다. 이를 통해 평가 대국의 우연과 학습 seed 자체의 변동을 분리합니다.
+
 best checkpoint 선택용 평가는 shaping을 사용하지 않고 실제 승·무·패만 사용합니다.
 `games.csv`의 `reward`와 `extrinsic_reward`도 실제 대국 결과를 유지하고,
 `shaping_reward`, `training_reward`에 학습용 reward를 별도로 기록합니다. 자동 보고서의
