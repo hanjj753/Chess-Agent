@@ -1,0 +1,28 @@
+Full-chess paired evaluation comparison
+A: analysis/ppo_value_ab/confirm_seed97000/baseline_seed1_step32768_1000_games.csv
+B: analysis/ppo_value_ab/confirm_seed97000/critic_seed1_step32768_1000_games.csv
+Paired games: 1000
+
+Aggregate results
+Model        W/D/L       Score   Avg plies
+A       421/537/ 42      69.0%       103.8
+B       417/543/ 40      68.8%       104.4
+
+Paired change (B - A)
+Score delta:       -0.10%
+95% CI:            [-2.48%, +2.28%]
+Improved/same/worse: 249/503/248
+Mean ply delta:    +0.58
+Sign-test p-value: 1.0000
+
+Outcome transitions
+A -> B             Games
+draw  -> draw       307
+draw  -> loss        18
+draw  -> win        212
+loss  -> draw        23
+loss  -> loss         5
+loss  -> win         14
+win   -> draw       213
+win   -> loss        17
+win   -> win        191
