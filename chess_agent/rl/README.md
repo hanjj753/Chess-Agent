@@ -1233,6 +1233,100 @@ done
 함께 사용하면 각 학습 seed의 점수를 세 평가 묶음, 총 3,000판 기준으로 평균낼
 수 있습니다. 이를 통해 평가 대국의 우연과 학습 seed 자체의 변동을 분리합니다.
 
+### Critic A/B를 65,536 timestep까지 연장
+
+32,768 timestep까지의 세 평가 묶음에서는 critic 사전학습 분기가 학습 seed
+6개 중 5개에서 높았지만, 평균 이득의 신뢰구간이 0에 거의 닿았습니다. 이 효과가
+초기 학습에만 존재하는지 확인하기 위해 두 분기를 65,536 timestep까지 같은
+조건으로 이어서 학습합니다.
+
+다음 명령은 기존 32,768 checkpoint 12개에서 각각 32,768 timestep을 추가합니다.
+`--reset-optimizer-state`를 사용하지 않으므로 Adam optimizer 상태도 이어집니다.
+기존 짧은 실험과 결과 파일이 겹치지 않도록 모든 출력에 `long`을 붙입니다.
+
+```bash
+for branch in baseline critic; do
+  for train_seed in 0 1 2 3 4 5; do
+    python -m chess_agent.rl.train_full_chess_ppo \
+      --resume-from "tmp/ppo_value_ab_${branch}_seed${train_seed}_checkpoints/full_chess_ppo_32768.zip" \
+      --additional-timesteps 32768 \
+      --opponent alpha-random --alpha-move-probability 0.25 --opponent-depth 1 \
+      --reward-shaping-coefficient 0.01 --reward-shaping-scale 600 \
+      --entropy-coefficient 0.01 \
+      --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 \
+      --learning-rate 0.00003 --target-kl 0.03 --max-plies 200 \
+      --evaluation-every 8192 --evaluation-games 300 --checkpoint-every 8192 \
+      --seed "$train_seed" --device cuda \
+      --initial-model-path "tmp/ppo_value_ab_long_${branch}_seed${train_seed}_initial.zip" \
+      --save-path "tmp/ppo_value_ab_long_${branch}_seed${train_seed}_final.zip" \
+      --best-model-path "tmp/ppo_value_ab_long_${branch}_seed${train_seed}_best.zip" \
+      --checkpoint-dir "tmp/ppo_value_ab_long_${branch}_seed${train_seed}_checkpoints" \
+      --experiment-dir analysis/experiments \
+      --experiment-name "ppo_value_ab_long_${branch}_seed${train_seed}"
+  done
+done
+```
+
+학습이 끝나면 새 실험 12개의 자동 보고서를 생성합니다. 이미 보고서가 있는
+기존 실험은 건너뜁니다. 300판 evaluation은 학습 곡선을 확인하기 위한 값이며
+최종 결론에는 아래의 공통 1,000판 평가를 사용합니다.
+
+```bash
+python -m chess_agent.rl.report_experiment analysis/experiments
+```
+
+다음으로 아직 모델 선택에 사용하지 않은 평가 seed `98000~98999`에서 공통
+initial actor를 한 번 평가합니다. 이 결과는 장기 학습이 최초 policy보다 실제로
+나아졌는지 확인하는 기준입니다.
+
+```bash
+mkdir -p analysis/ppo_value_ab/long_confirm_seed98000
+
+python -m chess_agent.rl.evaluate_full_chess_ppo \
+  --model-path tmp/full_chess_ppo_alpha_p25_initial.zip \
+  --games 1000 --opponent alpha-random --alpha-move-probability 0.25 \
+  --opponent-depth 1 --max-plies 200 --seed 98000 --device cuda \
+  --output-path analysis/ppo_value_ab/long_confirm_seed98000/initial_1000.txt
+```
+
+두 분기의 고정 65,536 checkpoint 12개를 같은 1,000판에 평가합니다. 학습 중
+300판으로 선택한 `*_best.zip`은 사용하지 않습니다.
+
+```bash
+for branch in baseline critic; do
+  for train_seed in 0 1 2 3 4 5; do
+    python -m chess_agent.rl.evaluate_full_chess_ppo \
+      --model-path "tmp/ppo_value_ab_long_${branch}_seed${train_seed}_checkpoints/full_chess_ppo_65536.zip" \
+      --games 1000 --opponent alpha-random --alpha-move-probability 0.25 \
+      --opponent-depth 1 --max-plies 200 --seed 98000 --device cuda \
+      --output-path "analysis/ppo_value_ab/long_confirm_seed98000/${branch}_seed${train_seed}_step65536_1000.txt"
+  done
+done
+```
+
+마지막으로 같은 대국끼리 critic의 상대적 이득과 initial 대비 변화를 계산합니다.
+`Score delta (B - A)`가 양수면 두 번째 모델의 점수가 높습니다.
+
+```bash
+for train_seed in 0 1 2 3 4 5; do
+  python -m chess_agent.rl.compare_full_chess_evaluations \
+    "analysis/ppo_value_ab/long_confirm_seed98000/baseline_seed${train_seed}_step65536_1000_games.csv" \
+    "analysis/ppo_value_ab/long_confirm_seed98000/critic_seed${train_seed}_step65536_1000_games.csv" \
+    --output-path "analysis/ppo_value_ab/long_confirm_seed98000/baseline_vs_critic_seed${train_seed}.txt"
+
+  for branch in baseline critic; do
+    python -m chess_agent.rl.compare_full_chess_evaluations \
+      analysis/ppo_value_ab/long_confirm_seed98000/initial_1000_games.csv \
+      "analysis/ppo_value_ab/long_confirm_seed98000/${branch}_seed${train_seed}_step65536_1000_games.csv" \
+      --output-path "analysis/ppo_value_ab/long_confirm_seed98000/initial_vs_${branch}_seed${train_seed}.txt"
+  done
+done
+```
+
+65,536 timestep에서 critic의 평균 우세가 유지되면 사전학습 critic을 이후 실험의
+기본 초기화로 채택합니다. 차이가 0에 가까워지면 critic 사전학습은 최종 기력보다
+초기 학습 속도를 높이는 warm start로 해석합니다.
+
 best checkpoint 선택용 평가는 shaping을 사용하지 않고 실제 승·무·패만 사용합니다.
 `games.csv`의 `reward`와 `extrinsic_reward`도 실제 대국 결과를 유지하고,
 `shaping_reward`, `training_reward`에 학습용 reward를 별도로 기록합니다. 자동 보고서의
