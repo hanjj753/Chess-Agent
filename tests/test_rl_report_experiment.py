@@ -220,6 +220,46 @@ def test_report_describes_reward_shaping(tmp_path: Path) -> None:
     assert "학습 신호가 매우 희소합니다" not in report
 
 
+def test_report_breaks_down_pool_opponents(tmp_path: Path) -> None:
+    logger = ExperimentLogger.create(
+        tmp_path,
+        experiment_name="pool report",
+        run_id="test_run",
+        config={
+            "total_timesteps": 2,
+            "opponent": "pool",
+            "alpha_move_probability": 0.5,
+            "pool_policy_probability": 0.5,
+            "opponent_model_paths": ["initial.zip", "champion.zip"],
+            "opponent_policy_device": "cpu",
+        },
+    )
+    for episode, opponent, reward in (
+        (1, "alpha-random-p0.5", 1.0),
+        (2, "policy:champion", 0.0),
+    ):
+        logger.log_game(
+            step=episode,
+            phase="train",
+            episode=episode,
+            result="1-0" if reward > 0 else "1/2-1/2",
+            reward=reward,
+            plies=20,
+            agent_color="white",
+            opponent=opponent,
+            termination="checkmate" if reward > 0 else "max_plies",
+        )
+
+    result = generate_experiment_report(logger.run_dir, create_plots=False)
+    report = result.summary_path.read_text(encoding="utf-8")
+
+    assert "Policy 상대:     models=2, device=cpu" in report
+    assert "Pool 비율:       policy=50.0%, alpha-random=50.0%" in report
+    assert "학습 상대별 결과" in report
+    assert "alpha-random-p0.5" in report
+    assert "policy:champion" in report
+
+
 def test_read_games_supports_legacy_reward_columns(tmp_path: Path) -> None:
     games_path = tmp_path / "games.csv"
     games_path.write_text(

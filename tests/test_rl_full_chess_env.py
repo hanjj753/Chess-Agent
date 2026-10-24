@@ -69,6 +69,7 @@ def test_full_chess_env_step_plays_agent_and_opponent_moves() -> None:
     assert not terminated
     assert not truncated
     assert info["opponent_move_uci"] == "e7e5"
+    assert info["opponent_name"] == "sequence"
     assert info["episode_plies"] == 2
     assert env.board is not None and env.board.turn == chess.WHITE
     assert env.observation_space.contains(observation)

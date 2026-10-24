@@ -2,6 +2,7 @@ import csv
 import json
 from pathlib import Path
 
+import chess
 import pytest
 import torch
 from torch import nn
@@ -10,6 +11,7 @@ from sb3_contrib.common.maskable.utils import is_masking_supported
 
 from chess_agent.rl.actions import ACTION_SIZE
 from chess_agent.rl.observations import history_observation_shape
+from chess_agent.rl.opponents import load_frozen_ppo_model
 from chess_agent.rl.policy_value import PolicyValueNetwork
 from chess_agent.rl.ppo_policy import (
     ChessMaskableActorCriticPolicy,
@@ -19,6 +21,7 @@ from chess_agent.rl.train_full_chess_ppo import (
     FullChessPPOConfig,
     TrackedMaskablePPO,
     evaluate_full_chess_ppo,
+    make_opponent,
     make_vector_env,
     train_full_chess_ppo,
     validate_config,
@@ -32,6 +35,93 @@ def test_full_chess_vector_env_supports_action_masking() -> None:
         assert is_masking_supported(env)
     finally:
         env.close()
+
+
+def test_policy_opponents_share_loaded_checkpoint(tmp_path: Path) -> None:
+    config = smoke_config()
+    env = make_vector_env(config)
+    model_path = tmp_path / "opponent.zip"
+    try:
+        model = TrackedMaskablePPO(
+            ChessMaskableActorCriticPolicy,
+            env,
+            n_steps=2,
+            batch_size=2,
+            n_epochs=1,
+            policy_kwargs={
+                "hidden_size": 8,
+                "dropout": 0.0,
+                "residual_blocks": 1,
+            },
+            device="cpu",
+        )
+        model.save(model_path)
+    finally:
+        env.close()
+
+    load_frozen_ppo_model.cache_clear()
+    first = make_opponent(
+        "policy",
+        depth=1,
+        time_limit=None,
+        model_paths=(model_path,),
+        policy_device="cpu",
+    )
+    second = make_opponent(
+        "policy",
+        depth=1,
+        time_limit=None,
+        model_paths=(model_path,),
+        policy_device="cpu",
+    )
+
+    assert first.select_move(chess.Board()) in chess.Board().legal_moves
+    assert second.select_move(chess.Board()) in chess.Board().legal_moves
+    assert load_frozen_ppo_model.cache_info().misses == 1
+    assert load_frozen_ppo_model.cache_info().hits == 1
+
+
+def test_full_chess_ppo_smoke_training_against_policy_pool(
+    tmp_path: Path,
+) -> None:
+    source_env = make_vector_env(smoke_config())
+    opponent_path = tmp_path / "pool_opponent.zip"
+    try:
+        opponent_model = TrackedMaskablePPO(
+            ChessMaskableActorCriticPolicy,
+            source_env,
+            n_steps=2,
+            batch_size=2,
+            n_epochs=1,
+            policy_kwargs={
+                "hidden_size": 8,
+                "dropout": 0.0,
+                "residual_blocks": 1,
+            },
+            device="cpu",
+        )
+        opponent_model.save(opponent_path)
+    finally:
+        source_env.close()
+
+    load_frozen_ppo_model.cache_clear()
+    model, result = train_full_chess_ppo(
+        smoke_config(
+            total_timesteps=2,
+            opponent="pool",
+            alpha_move_probability=0.5,
+            opponent_model_paths=(opponent_path,),
+            pool_policy_probability=0.5,
+            opponent_policy_device="cpu",
+            save_path=tmp_path / "pool_final.zip",
+            initial_model_path=tmp_path / "pool_initial.zip",
+            best_model_path=tmp_path / "pool_best.zip",
+        )
+    )
+
+    assert result.completed_timesteps == 2
+    assert result.final_evaluation.illegal_actions == 0
+    assert isinstance(model, MaskablePPO)
 
 
 def test_policy_value_transfer_preserves_actor_and_critic_outputs() -> None:
@@ -311,6 +401,30 @@ def test_full_chess_ppo_rejects_invalid_alpha_probability(
 ) -> None:
     with pytest.raises(ValueError, match="alpha_move_probability"):
         validate_config(smoke_config(alpha_move_probability=probability))
+
+
+@pytest.mark.parametrize("probability", (0.0, 1.1, float("nan")))
+def test_full_chess_ppo_rejects_invalid_pool_probability(
+    probability: float,
+) -> None:
+    with pytest.raises(ValueError, match="pool_policy_probability"):
+        validate_config(smoke_config(pool_policy_probability=probability))
+
+
+@pytest.mark.parametrize("opponent", ("policy", "pool"))
+def test_policy_opponents_require_model_paths(opponent: str) -> None:
+    with pytest.raises(ValueError, match="model path"):
+        validate_config(smoke_config(opponent=opponent))
+
+
+def test_non_policy_opponent_rejects_model_paths(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="only valid"):
+        validate_config(
+            smoke_config(
+                opponent="alpha-random",
+                opponent_model_paths=(tmp_path / "policy.zip",),
+            )
+        )
 
 
 def test_additional_timesteps_requires_resume_checkpoint() -> None:

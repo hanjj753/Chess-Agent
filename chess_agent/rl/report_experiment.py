@@ -256,9 +256,9 @@ def build_text_report(data: ExperimentData) -> str:
             ]
         )
     opponent_lines = []
-    if config.get("opponent") in {"alpha", "alpha-random"}:
+    if config.get("opponent") in {"alpha", "alpha-random", "pool"}:
         probability = ""
-        if config.get("opponent") == "alpha-random":
+        if config.get("opponent") in {"alpha-random", "pool"}:
             raw_probability = config.get("alpha_move_probability", 0.1)
             probability = f", alpha_move_probability={float(raw_probability):.1%}"
         opponent_lines.append(
@@ -267,6 +267,19 @@ def build_text_report(data: ExperimentData) -> str:
             f"time_limit={config.get('opponent_time_limit', 'none')}"
             f"{probability}"
         )
+    if config.get("opponent") in {"policy", "pool"}:
+        model_paths = config.get("opponent_model_paths", [])
+        opponent_lines.append(
+            "Policy 상대:     "
+            f"models={len(model_paths)}, "
+            f"device={config.get('opponent_policy_device', 'cpu')}"
+        )
+        if config.get("opponent") == "pool":
+            opponent_lines.append(
+                "Pool 비율:       "
+                f"policy={float(config.get('pool_policy_probability', 0.5)):.1%}, "
+                f"alpha-random={1.0 - float(config.get('pool_policy_probability', 0.5)):.1%}"
+            )
     train_games = tuple(game for game in data.games if game.phase == "train")
     train_stats = summarize_games(train_games)
     evaluation_groups = grouped_evaluation_games(data.games)
@@ -371,6 +384,26 @@ def build_text_report(data: ExperimentData) -> str:
     for termination, count in train_stats.terminations:
         rate = count / train_stats.games if train_stats.games else 0.0
         lines.append(f"종료 {termination:20s} {count:5d} ({rate:5.1%})")
+
+    if config.get("opponent") == "pool" and train_games:
+        games_by_opponent: dict[str, list[GameRow]] = defaultdict(list)
+        for game in train_games:
+            games_by_opponent[game.opponent].append(game)
+        lines.extend(
+            [
+                "",
+                "학습 상대별 결과",
+                "----------------",
+                "상대                              games       W/D/L   score",
+            ]
+        )
+        for opponent, games in sorted(games_by_opponent.items()):
+            stats = summarize_games(games)
+            lines.append(
+                f"{opponent[:32]:32s} {stats.games:6d} "
+                f"{stats.wins:3d}/{stats.draws:3d}/{stats.losses:3d} "
+                f"{stats.score_rate:7.1%}"
+            )
 
     lines.extend(
         [

@@ -388,6 +388,9 @@ class FullChessEnv(gym.Env):
         info: dict[str, Any] = {
             "fen": board.fen(),
             "agent_color": "white" if color == chess.WHITE else "black",
+            "opponent_name": str(
+                getattr(self.opponent, "active_name", self.opponent.name)
+            ),
             "episode_plies": self.episode_plies,
             "history_frames": len(self._board_history),
             "legal_moves": (

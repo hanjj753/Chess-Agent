@@ -93,6 +93,9 @@ def evaluate_model(
     deterministic: bool,
     seed: int,
     device: str,
+    opponent_model_paths: tuple[Path, ...] = (),
+    pool_policy_probability: float = 0.5,
+    opponent_policy_device: str = "cpu",
 ) -> FullChessEvaluationResult:
     model = TrackedMaskablePPO.load(model_path, device=device)
     resolved_history_length = (
@@ -109,6 +112,9 @@ def evaluate_model(
         alpha_move_probability=alpha_move_probability,
         opponent_depth=opponent_depth,
         opponent_time_limit=opponent_time_limit,
+        opponent_model_paths=opponent_model_paths,
+        pool_policy_probability=pool_policy_probability,
+        opponent_policy_device=opponent_policy_device,
         deterministic=deterministic,
         seed=seed,
     )
@@ -297,6 +303,14 @@ def main() -> None:
     parser.add_argument("--alpha-move-probability", type=float, default=0.1)
     parser.add_argument("--opponent-depth", type=int, default=1)
     parser.add_argument("--opponent-time-limit", type=float)
+    parser.add_argument(
+        "--opponent-model-path",
+        action="append",
+        type=Path,
+        default=[],
+    )
+    parser.add_argument("--pool-policy-probability", type=float, default=0.5)
+    parser.add_argument("--opponent-policy-device", default="cpu")
     parser.add_argument("--history-length", type=int)
     parser.add_argument("--max-plies", type=int, default=300)
     parser.add_argument("--stochastic", action="store_true")
@@ -343,6 +357,9 @@ def main() -> None:
                 alpha_move_probability=args.alpha_move_probability,
                 opponent_depth=args.opponent_depth,
                 opponent_time_limit=args.opponent_time_limit,
+                opponent_model_paths=tuple(args.opponent_model_path),
+                pool_policy_probability=args.pool_policy_probability,
+                opponent_policy_device=args.opponent_policy_device,
                 history_length=args.history_length,
                 max_plies=args.max_plies,
                 deterministic=not args.stochastic,
@@ -364,6 +381,8 @@ def main() -> None:
                 deterministic=not args.stochastic,
                 max_plies=args.max_plies,
                 alpha_move_probability=args.alpha_move_probability,
+                opponent_model_paths=tuple(args.opponent_model_path),
+                pool_policy_probability=args.pool_policy_probability,
             ),
         )
     if baseline_result.episodes != args.games:
@@ -392,6 +411,9 @@ def main() -> None:
                 alpha_move_probability=args.alpha_move_probability,
                 opponent_depth=args.opponent_depth,
                 opponent_time_limit=args.opponent_time_limit,
+                opponent_model_paths=tuple(args.opponent_model_path),
+                pool_policy_probability=args.pool_policy_probability,
+                opponent_policy_device=args.opponent_policy_device,
                 history_length=args.history_length,
                 max_plies=args.max_plies,
                 deterministic=not args.stochastic,
@@ -418,6 +440,8 @@ def main() -> None:
                 deterministic=not args.stochastic,
                 max_plies=args.max_plies,
                 alpha_move_probability=args.alpha_move_probability,
+                opponent_model_paths=tuple(args.opponent_model_path),
+                pool_policy_probability=args.pool_policy_probability,
             ),
         )
         score_delta, ci_low, ci_high = paired_delta(

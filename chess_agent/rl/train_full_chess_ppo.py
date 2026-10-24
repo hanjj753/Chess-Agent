@@ -21,6 +21,11 @@ from chess_agent.rl.full_chess_env import (
     BoardOnlyObservation,
     FullChessEnv,
 )
+from chess_agent.rl.opponents import (
+    FrozenPPOAgent,
+    OpponentPoolAgent,
+    OpponentPoolEntry,
+)
 from chess_agent.rl.policy_value import PolicyValueNetwork, load_policy_value
 from chess_agent.rl.ppo_policy import (
     ChessMaskableActorCriticPolicy,
@@ -28,7 +33,7 @@ from chess_agent.rl.ppo_policy import (
 )
 
 
-PPO_OPPONENTS = ("random", "alpha-random", "alpha")
+PPO_OPPONENTS = ("random", "alpha-random", "alpha", "policy", "pool")
 
 
 @dataclass(frozen=True)
@@ -59,6 +64,9 @@ class FullChessPPOConfig:
     alpha_move_probability: float = 0.1
     opponent_depth: int = 1
     opponent_time_limit: float | None = None
+    opponent_model_paths: tuple[Path, ...] = ()
+    pool_policy_probability: float = 0.5
+    opponent_policy_device: str = "cpu"
     evaluation_every: int = 10_000
     evaluation_games: int = 200
     checkpoint_every: int = 50_000
@@ -364,7 +372,9 @@ class FullChessTrainingCallback(BaseCallback):
                 reward=extrinsic_reward,
                 plies=int(info.get("episode_plies", 0)),
                 agent_color=str(info.get("agent_color", "unknown")),
-                opponent=self.config.opponent,
+                opponent=str(
+                    info.get("opponent_name", self.config.opponent)
+                ),
                 termination=str(info.get("termination", "unknown")),
                 extrinsic_reward=extrinsic_reward,
                 shaping_reward=shaping_reward,
@@ -582,6 +592,9 @@ def evaluate_full_chess_ppo(
     deterministic: bool,
     seed: int,
     alpha_move_probability: float = 0.1,
+    opponent_model_paths: tuple[Path, ...] = (),
+    pool_policy_probability: float = 0.5,
+    opponent_policy_device: str = "cpu",
 ) -> FullChessEvaluationResult:
     if episodes < 0:
         raise ValueError("episodes must be non-negative")
@@ -592,6 +605,9 @@ def evaluate_full_chess_ppo(
                 alpha_move_probability=alpha_move_probability,
                 depth=opponent_depth,
                 time_limit=opponent_time_limit,
+                model_paths=opponent_model_paths,
+                pool_policy_probability=pool_policy_probability,
+                policy_device=opponent_policy_device,
             ),
             history_length=history_length,
             max_plies=max_plies,
@@ -650,6 +666,9 @@ def evaluate_full_chess_ppo_from_config(
         alpha_move_probability=config.alpha_move_probability,
         opponent_depth=config.opponent_depth,
         opponent_time_limit=config.opponent_time_limit,
+        opponent_model_paths=config.opponent_model_paths,
+        pool_policy_probability=config.pool_policy_probability,
+        opponent_policy_device=config.opponent_policy_device,
         deterministic=config.deterministic_evaluation,
         seed=seed,
     )
@@ -673,6 +692,9 @@ def make_single_env(
             alpha_move_probability=config.alpha_move_probability,
             depth=config.opponent_depth,
             time_limit=config.opponent_time_limit,
+            model_paths=config.opponent_model_paths,
+            pool_policy_probability=config.pool_policy_probability,
+            policy_device=config.opponent_policy_device,
         ),
         history_length=config.history_length,
         max_plies=config.max_plies,
@@ -690,6 +712,9 @@ def make_opponent(
     alpha_move_probability: float = 0.1,
     depth: int,
     time_limit: float | None,
+    model_paths: tuple[Path, ...] = (),
+    pool_policy_probability: float = 0.5,
+    policy_device: str = "cpu",
 ) -> Agent:
     if kind == "random":
         return RandomAgent()
@@ -701,6 +726,48 @@ def make_opponent(
             depth=depth,
             time_limit=time_limit,
         )
+    if kind == "policy":
+        if len(model_paths) != 1:
+            raise ValueError("policy opponent requires exactly one model path")
+        return FrozenPPOAgent.from_path(
+            model_paths[0],
+            device=policy_device,
+        )
+    if kind == "pool":
+        if not model_paths:
+            raise ValueError("pool opponent requires at least one model path")
+        if not math.isfinite(pool_policy_probability) or not (
+            0.0 < pool_policy_probability <= 1.0
+        ):
+            raise ValueError("pool_policy_probability must be in (0, 1]")
+        entries: list[OpponentPoolEntry] = []
+        alpha_weight = 1.0 - pool_policy_probability
+        if alpha_weight > 0:
+            entries.append(
+                OpponentPoolEntry(
+                    name=f"alpha-random-p{alpha_move_probability:g}",
+                    agent=AlphaRandomAgent(
+                        alpha_move_probability=alpha_move_probability,
+                        depth=depth,
+                        time_limit=time_limit,
+                    ),
+                    weight=alpha_weight,
+                )
+            )
+        policy_weight = pool_policy_probability / len(model_paths)
+        for path in model_paths:
+            policy_agent = FrozenPPOAgent.from_path(
+                path,
+                device=policy_device,
+            )
+            entries.append(
+                OpponentPoolEntry(
+                    name=policy_agent.name,
+                    agent=policy_agent,
+                    weight=policy_weight,
+                )
+            )
+        return OpponentPoolAgent(tuple(entries))
     raise ValueError(f"unsupported PPO opponent: {kind}")
 
 
@@ -834,6 +901,20 @@ def validate_config(config: FullChessPPOConfig) -> None:
         0.0 <= config.alpha_move_probability <= 1.0
     ):
         raise ValueError("alpha_move_probability must be between 0 and 1")
+    if not math.isfinite(config.pool_policy_probability) or not (
+        0.0 < config.pool_policy_probability <= 1.0
+    ):
+        raise ValueError("pool_policy_probability must be in (0, 1]")
+    if config.opponent == "policy" and len(config.opponent_model_paths) != 1:
+        raise ValueError("policy opponent requires exactly one model path")
+    if config.opponent == "pool" and not config.opponent_model_paths:
+        raise ValueError("pool opponent requires at least one model path")
+    if config.opponent not in {"policy", "pool"} and config.opponent_model_paths:
+        raise ValueError(
+            "opponent_model_paths are only valid for policy or pool opponents"
+        )
+    if not config.opponent_policy_device.strip():
+        raise ValueError("opponent_policy_device must not be empty")
     if config.pretrained_policy_value_path is not None and config.resume_from is not None:
         raise ValueError("use pretrained_policy_value_path or resume_from, not both")
 
@@ -890,6 +971,24 @@ def main() -> None:
     )
     parser.add_argument("--opponent-depth", type=int, default=1)
     parser.add_argument("--opponent-time-limit", type=float)
+    parser.add_argument(
+        "--opponent-model-path",
+        action="append",
+        type=Path,
+        default=[],
+        help="frozen PPO checkpoint; repeat for multiple pool policies",
+    )
+    parser.add_argument(
+        "--pool-policy-probability",
+        type=float,
+        default=0.5,
+        help="per-game probability of selecting a frozen policy from the pool",
+    )
+    parser.add_argument(
+        "--opponent-policy-device",
+        default="cpu",
+        help="device used for frozen policy opponent inference",
+    )
     parser.add_argument("--evaluation-every", type=int, default=10_000)
     parser.add_argument("--evaluation-games", type=int, default=200)
     parser.add_argument("--checkpoint-every", type=int, default=50_000)
@@ -955,6 +1054,9 @@ def main() -> None:
             alpha_move_probability=args.alpha_move_probability,
             opponent_depth=args.opponent_depth,
             opponent_time_limit=args.opponent_time_limit,
+            opponent_model_paths=tuple(args.opponent_model_path),
+            pool_policy_probability=args.pool_policy_probability,
+            opponent_policy_device=args.opponent_policy_device,
             evaluation_every=args.evaluation_every,
             evaluation_games=args.evaluation_games,
             checkpoint_every=args.checkpoint_every,

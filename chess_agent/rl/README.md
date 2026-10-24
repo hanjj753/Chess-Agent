@@ -30,6 +30,7 @@ Gymnasium 환경
 - `train_tactical_supervised.py`: 여러 수짜리 tactical puzzle supervised 학습
 - `evaluate_tactical.py`: tactical puzzle 평가용 CLI
 - `full_chess_env.py`: 최근 보드 history와 고정 상대를 사용하는 일반 대국 환경
+- `opponents.py`: frozen PPO 상대와 대국 단위 weighted opponent pool
 - `policy_value.py`: 공유 CNN 위에 policy head와 value head를 둔 모델
 - `initialize_policy_value.py`: tactical CNN checkpoint를 Policy-Value 모델로 변환
 - `value_dataset.py`: full-chess value dataset의 bit-pack NPZ 저장/불러오기
@@ -1326,6 +1327,93 @@ done
 65,536 timestep에서 critic의 평균 우세가 유지되면 사전학습 critic을 이후 실험의
 기본 초기화로 채택합니다. 차이가 0에 가까워지면 critic 사전학습은 최종 기력보다
 초기 학습 속도를 높이는 warm start로 해석합니다.
+
+### League v1: p50 anchor와 frozen policy pool
+
+장기 A/B 결과에서 critic 분기를 기본값으로 채택했으므로 더 이상 12개 분기를
+동시에 학습하지 않습니다. 개발 속도를 높이기 위해 가장 강했던 critic seed 0의
+65,536 checkpoint 하나를 learner로 사용합니다. 매 대국 상대는 다음 비율로
+선택되며, 선택된 상대는 대국이 끝날 때까지 바뀌지 않습니다.
+
+```text
+50%  alpha-random p50
+25%  최초 pretrained policy
+25%  65,536 timestep frozen champion
+```
+
+`--opponent-model-path`를 여러 번 주면 policy 비율을 모델들이 균등하게 나눕니다.
+frozen 모델은 vector environment 사이에서 공유되므로 같은 checkpoint를 GPU에
+반복해서 올리지 않습니다. 다음 명령은 champion에서 32,768 timestep을 추가해
+총 98,304 timestep의 league v1 후보를 만듭니다.
+
+```bash
+python -m chess_agent.rl.train_full_chess_ppo \
+  --resume-from tmp/ppo_value_ab_long_critic_seed0_checkpoints/full_chess_ppo_65536.zip \
+  --additional-timesteps 32768 \
+  --opponent pool \
+  --alpha-move-probability 0.50 --opponent-depth 1 \
+  --opponent-model-path tmp/full_chess_ppo_alpha_p25_initial.zip \
+  --opponent-model-path tmp/ppo_value_ab_long_critic_seed0_checkpoints/full_chess_ppo_65536.zip \
+  --pool-policy-probability 0.50 --opponent-policy-device cuda \
+  --reward-shaping-coefficient 0.01 --reward-shaping-scale 600 \
+  --entropy-coefficient 0.01 \
+  --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 \
+  --learning-rate 0.00003 --target-kl 0.03 --max-plies 200 \
+  --evaluation-every 8192 --evaluation-games 300 --checkpoint-every 8192 \
+  --seed 0 --device cuda \
+  --initial-model-path tmp/full_chess_ppo_league_v1_seed0_initial.zip \
+  --save-path tmp/full_chess_ppo_league_v1_seed0_final.zip \
+  --best-model-path tmp/full_chess_ppo_league_v1_seed0_best.zip \
+  --checkpoint-dir tmp/full_chess_ppo_league_v1_seed0_checkpoints \
+  --experiment-dir analysis/experiments \
+  --experiment-name ppo_league_v1_seed0
+```
+
+GPU 메모리가 부족하면 learner만 CUDA에 두고 frozen 상대를 CPU에서 실행하도록
+`--opponent-policy-device cpu`로 바꿉니다. 학습 후 자동 보고서를 생성합니다.
+
+```bash
+python -m chess_agent.rl.report_experiment analysis/experiments
+```
+
+다음 평가는 학습 전 champion과 league 후보를 같은 300판에서 비교합니다. p25는
+기존 실력의 망각 여부를, p50은 더 강한 상대에 대한 적응을 확인합니다. 이 단계는
+빠른 개발 판단용이므로 6개 seed와 1,000판 평가는 사용하지 않습니다.
+
+```bash
+mkdir -p analysis/ppo_league_v1
+
+for label in p25 p50; do
+  if [ "$label" = p25 ]; then
+    alpha_probability=0.25
+  else
+    alpha_probability=0.50
+  fi
+
+  python -m chess_agent.rl.evaluate_full_chess_ppo \
+    --model-path tmp/ppo_value_ab_long_critic_seed0_checkpoints/full_chess_ppo_65536.zip \
+    --games 300 --opponent alpha-random \
+    --alpha-move-probability "$alpha_probability" --opponent-depth 1 \
+    --max-plies 200 --seed 99000 --device cuda \
+    --output-path "analysis/ppo_league_v1/champion_${label}_300.txt"
+
+  python -m chess_agent.rl.evaluate_full_chess_ppo \
+    --model-path tmp/full_chess_ppo_league_v1_seed0_checkpoints/full_chess_ppo_98304.zip \
+    --games 300 --opponent alpha-random \
+    --alpha-move-probability "$alpha_probability" --opponent-depth 1 \
+    --max-plies 200 --seed 99000 --device cuda \
+    --output-path "analysis/ppo_league_v1/candidate_${label}_300.txt"
+
+  python -m chess_agent.rl.compare_full_chess_evaluations \
+    "analysis/ppo_league_v1/champion_${label}_300_games.csv" \
+    "analysis/ppo_league_v1/candidate_${label}_300_games.csv" \
+    --output-path "analysis/ppo_league_v1/champion_vs_candidate_${label}.txt"
+done
+```
+
+p50 점수가 오르면서 p25 점수가 크게 떨어지지 않으면 candidate를 새 champion으로
+승격하고 다음 league에서는 이 checkpoint를 pool에 추가합니다. 빠른 개발 단계의
+승격 기준은 p50 `Score delta`가 양수이고 p25 하락이 1%p 이내인 경우입니다.
 
 best checkpoint 선택용 평가는 shaping을 사용하지 않고 실제 승·무·패만 사용합니다.
 `games.csv`의 `reward`와 `extrinsic_reward`도 실제 대국 결과를 유지하고,

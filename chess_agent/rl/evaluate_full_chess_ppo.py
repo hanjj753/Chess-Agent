@@ -22,6 +22,8 @@ def format_full_chess_report(
     deterministic: bool | None = None,
     max_plies: int | None = None,
     alpha_move_probability: float | None = None,
+    opponent_model_paths: tuple[Path, ...] = (),
+    pool_policy_probability: float | None = None,
 ) -> str:
     lines = [
         "Full-chess PPO evaluation",
@@ -42,6 +44,14 @@ def format_full_chess_report(
         lines.append(f"Max plies:      {max_plies}")
     if opponent == "alpha-random" and alpha_move_probability is not None:
         lines.append(f"Alpha move prob:{alpha_move_probability:8.1%}")
+    if opponent in {"policy", "pool"}:
+        lines.append(f"Policy models:  {len(opponent_model_paths)}")
+        for path in opponent_model_paths:
+            lines.append(f"  - {path}")
+    if opponent == "pool" and pool_policy_probability is not None:
+        lines.append(f"Policy share:   {pool_policy_probability:8.1%}")
+        if alpha_move_probability is not None:
+            lines.append(f"Anchor alpha p: {alpha_move_probability:8.1%}")
     lines.extend(["", "Color breakdown", "Color   Games   W/D/L   Score"])
     for color in ("white", "black"):
         games = tuple(game for game in result.games if game.agent_color == color)
@@ -165,6 +175,15 @@ def main() -> None:
     )
     parser.add_argument("--opponent-depth", type=int, default=1)
     parser.add_argument("--opponent-time-limit", type=float)
+    parser.add_argument(
+        "--opponent-model-path",
+        action="append",
+        type=Path,
+        default=[],
+        help="frozen PPO checkpoint; repeat for multiple pool policies",
+    )
+    parser.add_argument("--pool-policy-probability", type=float, default=0.5)
+    parser.add_argument("--opponent-policy-device", default="cpu")
     parser.add_argument("--history-length", type=int)
     parser.add_argument("--max-plies", type=int, default=300)
     parser.add_argument("--stochastic", action="store_true")
@@ -189,6 +208,9 @@ def main() -> None:
         alpha_move_probability=args.alpha_move_probability,
         opponent_depth=args.opponent_depth,
         opponent_time_limit=args.opponent_time_limit,
+        opponent_model_paths=tuple(args.opponent_model_path),
+        pool_policy_probability=args.pool_policy_probability,
+        opponent_policy_device=args.opponent_policy_device,
         deterministic=not args.stochastic,
         seed=args.seed,
     )
@@ -200,6 +222,8 @@ def main() -> None:
         deterministic=not args.stochastic,
         max_plies=args.max_plies,
         alpha_move_probability=args.alpha_move_probability,
+        opponent_model_paths=tuple(args.opponent_model_path),
+        pool_policy_probability=args.pool_policy_probability,
     )
     print(report, end="")
     if args.output_path is not None:
