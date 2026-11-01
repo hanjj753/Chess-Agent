@@ -1,0 +1,28 @@
+Full-chess paired evaluation comparison
+A: analysis/ppo_league_v1/champion_p50_300_games.csv
+B: analysis/ppo_league_v1/candidate_p50_300_games.csv
+Paired games: 300
+
+Aggregate results
+Model        W/D/L       Score   Avg plies
+A        60/156/ 84      46.0%       105.8
+B        46/159/ 95      41.8%       110.0
+
+Paired change (B - A)
+Score delta:       -4.17%
+95% CI:            [-9.18%, +0.85%]
+Improved/same/worse: 69/135/96
+Mean ply delta:    +4.22
+Sign-test p-value: 0.0426
+
+Outcome transitions
+A -> B             Games
+draw  -> draw        87
+draw  -> loss        46
+draw  -> win         23
+loss  -> draw        33
+loss  -> loss        38
+loss  -> win         13
+win   -> draw        39
+win   -> loss        11
+win   -> win         10
