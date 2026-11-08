@@ -1421,6 +1421,119 @@ best checkpoint 선택용 평가는 shaping을 사용하지 않고 실제 승·�
 `extrinsic 신호 비율`과 `전체 학습 신호 비율`을 비교하면 shaping이 희소성을 얼마나
 줄였는지 볼 수 있습니다.
 
+### League v2: 학습 pool과 checkpoint 선택 상대 분리
+
+League v1의 pool best(`81,920 step`)는 p25 71.2%, p50 44.8%였습니다.
+기존 champion의 71.5%/46.0%보다 개선됐다는 근거가 없으므로 champion은
+`tmp/ppo_value_ab_long_critic_seed0_checkpoints/full_chess_ppo_65536.zip`으로 유지합니다.
+pool 내부 점수 상승만으로 강한 외부 상대에 대한 기력 향상을 판단하지 않습니다.
+
+이번에는 **학습에 사용할 상대**와 **best checkpoint를 선택할 상대**를 분리합니다.
+
+- 학습: p50 alpha-random 75%, initial policy 12.5%, frozen champion 12.5%.
+- best 선택: pool이 아닌 p50 alpha-random에만 300판, 같은 seed와 색 순서.
+- 조기 종료: best 점수율이 3회 연속 개선되지 않으면 중단.
+- 독립 확인: 학습이 끝난 뒤 다른 seed의 p25/p50에서 champion과 비교.
+
+`--pool-policy-probability 0.25`는 **대국 단위**로 policy 상대를 선택하는 확률입니다.
+나머지 75%의 대국은 alpha-random 상대입니다. `--alpha-move-probability 0.50`은
+그 alpha-random 상대가 **매 수** alpha 수를 선택하는 확률입니다. 두 확률은 다릅니다.
+
+#### 1. 서버 업데이트와 학습
+
+다음 명령은 기존 champion에서 최대 65,536 timestep을 추가합니다. 실제 학습량은
+조기 종료로 줄어들 수 있습니다. seed는 학습 0, 선택 평가 110000, 최종 진단
+평가 210000으로 분리합니다. 선택/최종 진단 평가는 모두 p50이며 shaping은 없습니다.
+
+```bash
+git pull origin main
+
+python -m chess_agent.rl.train_full_chess_ppo \
+  --resume-from tmp/ppo_value_ab_long_critic_seed0_checkpoints/full_chess_ppo_65536.zip \
+  --additional-timesteps 65536 \
+  --opponent pool --alpha-move-probability 0.50 --opponent-depth 1 \
+  --opponent-model-path tmp/full_chess_ppo_alpha_p25_initial.zip \
+  --opponent-model-path tmp/ppo_value_ab_long_critic_seed0_checkpoints/full_chess_ppo_65536.zip \
+  --pool-policy-probability 0.25 --opponent-policy-device cuda \
+  --evaluation-opponent alpha-random --evaluation-alpha-move-probability 0.50 \
+  --evaluation-opponent-depth 1 --evaluation-seed 110000 \
+  --evaluation-every 8192 --evaluation-games 300 --checkpoint-every 8192 \
+  --early-stopping-patience 3 \
+  --reward-shaping-coefficient 0.01 --reward-shaping-scale 600 \
+  --entropy-coefficient 0.01 \
+  --n-envs 4 --n-steps 256 --batch-size 256 --n-epochs 2 \
+  --learning-rate 0.00003 --target-kl 0.03 --max-plies 200 \
+  --seed 0 --device cuda \
+  --initial-model-path tmp/full_chess_ppo_league_v2_seed0_initial.zip \
+  --save-path tmp/full_chess_ppo_league_v2_seed0_final.zip \
+  --best-model-path tmp/full_chess_ppo_league_v2_seed0_best.zip \
+  --checkpoint-dir tmp/full_chess_ppo_league_v2_seed0_checkpoints \
+  --experiment-dir analysis/experiments --experiment-name ppo_league_v2_seed0
+```
+
+GPU 메모리가 부족하면 frozen 상대만 `--opponent-policy-device cpu`로 바꿉니다.
+learner의 `--device cuda`는 그대로 유지합니다.
+
+평가 관련 옵션을 생략하면 이전처럼 학습 상대 설정을 그대로 사용합니다.
+`--evaluation-opponent`는 `random`, `alpha-random`, `alpha` 중 하나이며, 평가 난이도는
+각 `--evaluation-*` 옵션을 생략하면 학습 설정을 상속합니다. 명시적인 평가 상대에는
+학습 pool의 policy checkpoint가 전달되지 않습니다. `--evaluation-seed`를 생략하면
+`seed + 100000`, 마지막 진단 평가는 항상 선택 평가 seed에 100000을 더합니다.
+
+`--early-stopping-patience 0`은 조기 종료를 끕니다(기본값).
+`--early-stopping-min-delta` 기본값은 0이고 점수율이 **엄격하게 높을 때만** best를
+교체하고 patience를 초기화합니다. 예를 들어 0.01이면 1%p를 초과하는 개선이
+필요합니다. 이 옵션을 쓰면 미세한 개선은 best 저장에서도 무시됩니다.
+시작 모델도 best 후보이므로 이후 모든 평가가 나빠지면 best 파일에는 시작 모델이
+남습니다. final은 중단 시점 모델이며 best와 같다는 보장은 없습니다.
+
+콘솔의 `selection best_step=... best_score=... no_improvement=...`에서 best 시점과
+연속 미개선 횟수를 확인합니다. `summary.json`에는 `stopped_early`, `best_step`,
+`best_score_rate`를 저장하고 조기 종료가 발생하면 `events.jsonl`에도 남깁니다.
+
+#### 2. 학습 보고서
+
+```bash
+python -m chess_agent.rl.report_experiment analysis/experiments
+```
+
+새 실험의 보고서에 학습 상대, 평가 상대, 선택/최종 평가 seed, best step,
+조기 종료 여부를 표시합니다. 이미 보고서가 완성된 기존 폴더는 건너뜁니다.
+
+#### 3. Best 모델 독립 평가
+
+아래 명령은 champion과 league v2 best를 새 seed 310000에서 각각 p25/p50에
+300판씩 평가하고 같은 seed의 결과끼리 비교합니다. 이것은 빠른 개발용 검사이며
+하나의 학습 seed 결과만으로 일반적 우세나 Elo를 확정하지 않습니다.
+
+```bash
+mkdir -p analysis/ppo_league_v2
+for label in p25 p50; do
+  if [ "$label" = p25 ]; then probability=0.25; else probability=0.50; fi
+  for model in champion best; do
+    if [ "$model" = champion ]; then
+      path=tmp/ppo_value_ab_long_critic_seed0_checkpoints/full_chess_ppo_65536.zip
+    else
+      path=tmp/full_chess_ppo_league_v2_seed0_best.zip
+    fi
+    python -m chess_agent.rl.evaluate_full_chess_ppo \
+      --model-path "$path" --games 300 --opponent alpha-random \
+      --alpha-move-probability "$probability" --opponent-depth 1 \
+      --max-plies 200 --seed 310000 --device cuda \
+      --output-path "analysis/ppo_league_v2/${model}_${label}_300.txt"
+  done
+  python -m chess_agent.rl.compare_full_chess_evaluations \
+    "analysis/ppo_league_v2/champion_${label}_300_games.csv" \
+    "analysis/ppo_league_v2/best_${label}_300_games.csv" \
+    --output-path "analysis/ppo_league_v2/champion_vs_best_${label}.txt"
+done
+```
+
+まず p50 差分が正、p25 下落が 1%p 以内かを見ます。成功なら次の候補に進み、
+悪化や同等なら同じ条件の大量再評価を重ねず、学習方式を見直します。
+内部 best 選択と外部成績の差は別問題です。今回の変更は評価基準を揃えるための
+もので、p50 の改善を保証するものではありません。
+
 ## 실험 과정 기록
 
 학습 명령에 `--experiment-dir`을 지정하면 실행마다 timestamp가 붙은 별도 폴더를

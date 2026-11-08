@@ -260,6 +260,43 @@ def test_report_breaks_down_pool_opponents(tmp_path: Path) -> None:
     assert "policy:champion" in report
 
 
+def test_report_describes_separate_evaluation_and_early_stopping(tmp_path: Path) -> None:
+    logger = ExperimentLogger.create(
+        tmp_path,
+        experiment_name="selection report",
+        run_id="test_run",
+        config={
+            "opponent": "pool",
+            "alpha_move_probability": 0.25,
+            "evaluation_opponent": "alpha-random",
+            "evaluation_alpha_move_probability": 0.5,
+            "evaluation_opponent_depth": 2,
+            "evaluation_seed": 110000,
+            "early_stopping_patience": 3,
+            "early_stopping_min_delta": 0.01,
+        },
+    )
+    logger.save_summary({
+        "completed_timesteps": 6,
+        "target_timesteps": 12,
+        "stopped_early": True,
+    })
+    logger.log_checkpoint(
+        step=2, path="best.zip", is_best=True, metrics={"score_rate": 0.55},
+    )
+
+    result = generate_experiment_report(logger.run_dir, create_plots=False)
+    report = result.summary_path.read_text(encoding="utf-8")
+
+    assert "학습 상대:       pool" in report
+    assert "평가 상대:       alpha-random (best 선택 기준)" in report
+    assert "평가 설정:       depth=2, time_limit=None, alpha_move_probability=50.0%" in report
+    assert "평가 seed:       selection=110000, final=210000" in report
+    assert "조기 종료:       patience=3, min_delta=1.0%" in report
+    assert "조기 종료 여부:  yes" in report
+    assert "evaluation score: 55.0%" in report
+
+
 def test_read_games_supports_legacy_reward_columns(tmp_path: Path) -> None:
     games_path = tmp_path / "games.csv"
     games_path.write_text(

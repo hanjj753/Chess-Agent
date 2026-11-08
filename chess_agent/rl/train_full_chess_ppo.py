@@ -1,5 +1,5 @@
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from pathlib import Path
 from typing import Any, Callable, cast
@@ -34,6 +34,7 @@ from chess_agent.rl.ppo_policy import (
 
 
 PPO_OPPONENTS = ("random", "alpha-random", "alpha", "policy", "pool")
+EVALUATION_OPPONENTS = ("random", "alpha-random", "alpha")
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,13 @@ class FullChessPPOConfig:
     opponent_policy_device: str = "cpu"
     evaluation_every: int = 10_000
     evaluation_games: int = 200
+    evaluation_opponent: str | None = None
+    evaluation_alpha_move_probability: float | None = None
+    evaluation_opponent_depth: int | None = None
+    evaluation_opponent_time_limit: float | None = None
+    evaluation_seed: int | None = None
+    early_stopping_patience: int = 0
+    early_stopping_min_delta: float = 0.0
     checkpoint_every: int = 50_000
     deterministic_evaluation: bool = True
     initial_evaluation: bool = True
@@ -145,6 +153,9 @@ class FullChessPPOTrainingResult:
     start_timesteps: int
     target_timesteps: int
     trained_timesteps: int
+    stopped_early: bool
+    best_step: int
+    best_score_rate: float
     initial_model_path: Path
     final_model_path: Path
     best_model_path: Path
@@ -208,6 +219,9 @@ class FullChessTrainingCallback(BaseCallback):
         self.experiment_logger = experiment_logger
         self.training_episode = 0
         self.best_score_rate = -1.0
+        self.best_step = 0
+        self.evaluations_without_improvement = 0
+        self.stopped_early = False
         self.saved_best_this_run = False
         self.next_evaluation = 0
         self.next_checkpoint = 0
@@ -301,12 +315,12 @@ class FullChessTrainingCallback(BaseCallback):
                     )
                 self.next_checkpoint += self.config.checkpoint_every
 
-        if self.config.evaluation_every > 0:
+        if self.config.evaluation_every > 0 and self.config.evaluation_games > 0:
             while self.num_timesteps >= self.next_evaluation:
                 result = evaluate_full_chess_ppo_from_config(
                     model=cast(MaskablePPO, self.model),
                     config=self.config,
-                    seed=self.config.seed + 100_000,
+                    seed=selection_evaluation_seed(self.config),
                 )
                 print_evaluation(self.num_timesteps, result)
                 if self.experiment_logger is not None:
@@ -314,23 +328,60 @@ class FullChessTrainingCallback(BaseCallback):
                         self.experiment_logger,
                         step=self.num_timesteps,
                         phase="evaluation",
-                        opponent=self.config.opponent,
+                        opponent=resolved_evaluation_config(self.config).opponent,
                         checkpoint=f"step:{self.num_timesteps}",
                         result=result,
                     )
-                if result.score_rate > self.best_score_rate:
-                    self.best_score_rate = result.score_rate
-                    saved_path = save_ppo_model(self.model, self.config.best_model_path)
-                    self.saved_best_this_run = True
-                    if self.experiment_logger is not None:
-                        self.experiment_logger.log_checkpoint(
-                            step=self.num_timesteps,
-                            path=saved_path,
-                            is_best=True,
-                            metrics={"score_rate": result.score_rate},
-                        )
                 self.next_evaluation += self.config.evaluation_every
+                if not self.record_selection_evaluation(result):
+                    return False
 
+        return True
+
+    def record_selection_evaluation(self, result: FullChessEvaluationResult) -> bool:
+        if not self.saved_best_this_run or result.score_rate > (
+            self.best_score_rate + self.config.early_stopping_min_delta
+        ):
+            self.best_score_rate = result.score_rate
+            self.best_step = self.model.num_timesteps
+            self.evaluations_without_improvement = 0
+            saved_path = save_ppo_model(self.model, self.config.best_model_path)
+            self.saved_best_this_run = True
+            if self.experiment_logger is not None:
+                self.experiment_logger.log_checkpoint(
+                    step=self.best_step,
+                    path=saved_path,
+                    is_best=True,
+                    metrics={"score_rate": result.score_rate},
+                )
+        else:
+            self.evaluations_without_improvement += 1
+
+        patience = self.config.early_stopping_patience
+        print(
+            f"selection best_step={self.best_step} "
+            f"best_score={self.best_score_rate:.1%} "
+            f"no_improvement={self.evaluations_without_improvement} "
+            f"patience={patience or 'off'}",
+            flush=True,
+        )
+        if patience > 0 and self.evaluations_without_improvement >= patience:
+            self.stopped_early = True
+            print(
+                f"Early stopping at step {self.model.num_timesteps}: "
+                f"no improvement for {patience} evaluations "
+                f"(best step: {self.best_step}).",
+                flush=True,
+            )
+            if self.experiment_logger is not None:
+                self.experiment_logger.log_event(
+                    "early_stopping",
+                    step=self.model.num_timesteps,
+                    best_step=self.best_step,
+                    best_score_rate=self.best_score_rate,
+                    evaluations_without_improvement=self.evaluations_without_improvement,
+                )
+            return False
         return True
 
     def _record_step_rewards(self) -> None:
@@ -498,7 +549,7 @@ def train_full_chess_ppo(
             baseline = evaluate_full_chess_ppo_from_config(
                 model=model,
                 config=config,
-                seed=config.seed + 100_000,
+                seed=selection_evaluation_seed(config),
             )
             print_evaluation(initial_step, baseline)
             if experiment_logger is not None:
@@ -506,20 +557,12 @@ def train_full_chess_ppo(
                     experiment_logger,
                     step=initial_step,
                     phase="evaluation",
-                    opponent=config.opponent,
+                    opponent=resolved_evaluation_config(config).opponent,
                     checkpoint=f"step:{initial_step}:initial",
                     result=baseline,
                 )
-            callback.best_score_rate = baseline.score_rate
-            baseline_path = save_ppo_model(model, config.best_model_path)
-            callback.saved_best_this_run = True
-            if experiment_logger is not None:
-                experiment_logger.log_checkpoint(
-                    step=initial_step,
-                    path=baseline_path,
-                    is_best=True,
-                    metrics={"score_rate": baseline.score_rate},
-                )
+            callback.model = model
+            callback.record_selection_evaluation(baseline)
         if remaining_timesteps > 0:
             model.learn(
                 total_timesteps=remaining_timesteps,
@@ -532,11 +575,12 @@ def train_full_chess_ppo(
         final_evaluation = evaluate_full_chess_ppo_from_config(
             model=model,
             config=config,
-            seed=config.seed + 200_000,
+            seed=selection_evaluation_seed(config) + 100_000,
         )
         best_model_path = normalized_ppo_path(config.best_model_path)
         if not callback.saved_best_this_run:
             callback.best_score_rate = final_evaluation.score_rate
+            callback.best_step = model.num_timesteps
             best_model_path = save_ppo_model(model, best_model_path)
             callback.saved_best_this_run = True
             if experiment_logger is not None:
@@ -555,7 +599,7 @@ def train_full_chess_ppo(
                 experiment_logger,
                 step=model.num_timesteps,
                 phase="final_evaluation",
-                opponent=config.opponent,
+                opponent=resolved_evaluation_config(config).opponent,
                 checkpoint=final_model_path,
                 result=final_evaluation,
             )
@@ -565,6 +609,9 @@ def train_full_chess_ppo(
             start_timesteps=start_timesteps,
             target_timesteps=target_timesteps,
             trained_timesteps=model.num_timesteps - start_timesteps,
+            stopped_early=callback.stopped_early,
+            best_step=callback.best_step,
+            best_score_rate=callback.best_score_rate,
             initial_model_path=initial_model_path,
             final_model_path=final_model_path,
             best_model_path=best_model_path,
@@ -657,6 +704,7 @@ def evaluate_full_chess_ppo_from_config(
     config: FullChessPPOConfig,
     seed: int,
 ) -> FullChessEvaluationResult:
+    config = resolved_evaluation_config(config)
     return evaluate_full_chess_ppo(
         model=model,
         episodes=config.evaluation_games,
@@ -671,6 +719,39 @@ def evaluate_full_chess_ppo_from_config(
         opponent_policy_device=config.opponent_policy_device,
         deterministic=config.deterministic_evaluation,
         seed=seed,
+    )
+
+
+def resolved_evaluation_config(config: FullChessPPOConfig) -> FullChessPPOConfig:
+    return replace(
+        config,
+        opponent=config.evaluation_opponent or config.opponent,
+        alpha_move_probability=(
+            config.evaluation_alpha_move_probability
+            if config.evaluation_alpha_move_probability is not None
+            else config.alpha_move_probability
+        ),
+        opponent_depth=(
+            config.evaluation_opponent_depth
+            if config.evaluation_opponent_depth is not None
+            else config.opponent_depth
+        ),
+        opponent_time_limit=(
+            config.evaluation_opponent_time_limit
+            if config.evaluation_opponent_time_limit is not None
+            else config.opponent_time_limit
+        ),
+        opponent_model_paths=(
+            () if config.evaluation_opponent is not None else config.opponent_model_paths
+        ),
+    )
+
+
+def selection_evaluation_seed(config: FullChessPPOConfig) -> int:
+    return (
+        config.evaluation_seed
+        if config.evaluation_seed is not None
+        else config.seed + 100_000
     )
 
 
@@ -895,6 +976,34 @@ def validate_config(config: FullChessPPOConfig) -> None:
         raise ValueError("evaluation and checkpoint intervals must be non-negative")
     if config.evaluation_games < 0:
         raise ValueError("evaluation_games must be non-negative")
+    if config.evaluation_opponent is not None and (
+        config.evaluation_opponent not in EVALUATION_OPPONENTS
+    ):
+        raise ValueError("unsupported evaluation_opponent")
+    evaluation = resolved_evaluation_config(config)
+    if not math.isfinite(evaluation.alpha_move_probability) or not (
+        0.0 <= evaluation.alpha_move_probability <= 1.0
+    ):
+        raise ValueError("evaluation_alpha_move_probability must be between 0 and 1")
+    if evaluation.opponent_depth < 1:
+        raise ValueError("evaluation_opponent_depth must be positive")
+    if evaluation.opponent_time_limit is not None and (
+        not math.isfinite(evaluation.opponent_time_limit)
+        or evaluation.opponent_time_limit <= 0
+    ):
+        raise ValueError("evaluation_opponent_time_limit must be positive")
+    if config.evaluation_seed is not None and config.evaluation_seed < 0:
+        raise ValueError("evaluation_seed must be non-negative")
+    if config.early_stopping_patience < 0:
+        raise ValueError("early_stopping_patience must be non-negative")
+    if not math.isfinite(config.early_stopping_min_delta) or not (
+        0.0 <= config.early_stopping_min_delta <= 1.0
+    ):
+        raise ValueError("early_stopping_min_delta must be between 0 and 1")
+    if config.early_stopping_patience > 0 and (
+        config.evaluation_every == 0 or config.evaluation_games == 0
+    ):
+        raise ValueError("early stopping requires periodic evaluation games")
     if config.opponent not in PPO_OPPONENTS:
         raise ValueError(f"unsupported PPO opponent: {config.opponent}")
     if not math.isfinite(config.alpha_move_probability) or not (
@@ -991,6 +1100,25 @@ def main() -> None:
     )
     parser.add_argument("--evaluation-every", type=int, default=10_000)
     parser.add_argument("--evaluation-games", type=int, default=200)
+    parser.add_argument(
+        "--evaluation-opponent", choices=EVALUATION_OPPONENTS,
+        help="checkpoint-selection opponent; defaults to the training opponent",
+    )
+    parser.add_argument("--evaluation-alpha-move-probability", type=float)
+    parser.add_argument("--evaluation-opponent-depth", type=int)
+    parser.add_argument("--evaluation-opponent-time-limit", type=float)
+    parser.add_argument(
+        "--evaluation-seed", type=int,
+        help="fixed checkpoint-selection seed (default: seed + 100000)",
+    )
+    parser.add_argument(
+        "--early-stopping-patience", type=int, default=0,
+        help="stop after this many evaluations without improvement; 0 disables",
+    )
+    parser.add_argument(
+        "--early-stopping-min-delta", type=float, default=0.0,
+        help="minimum score-rate gain to save a best model/reset patience; 0.01 = 1pp",
+    )
     parser.add_argument("--checkpoint-every", type=int, default=50_000)
     parser.add_argument("--stochastic-evaluation", action="store_true")
     parser.add_argument("--no-initial-evaluation", action="store_true")
@@ -1059,6 +1187,13 @@ def main() -> None:
             opponent_policy_device=args.opponent_policy_device,
             evaluation_every=args.evaluation_every,
             evaluation_games=args.evaluation_games,
+            evaluation_opponent=args.evaluation_opponent,
+            evaluation_alpha_move_probability=args.evaluation_alpha_move_probability,
+            evaluation_opponent_depth=args.evaluation_opponent_depth,
+            evaluation_opponent_time_limit=args.evaluation_opponent_time_limit,
+            evaluation_seed=args.evaluation_seed,
+            early_stopping_patience=args.early_stopping_patience,
+            early_stopping_min_delta=args.early_stopping_min_delta,
             checkpoint_every=args.checkpoint_every,
             deterministic_evaluation=not args.stochastic_evaluation,
             initial_evaluation=not args.no_initial_evaluation,
@@ -1081,9 +1216,12 @@ def main() -> None:
     print(f"Start timesteps: {result.start_timesteps}")
     print(f"Added timesteps: {result.trained_timesteps}")
     print(f"Final timesteps: {result.completed_timesteps}")
+    print(f"Stopped early:   {'yes' if result.stopped_early else 'no'}")
     print(f"Initial model:   {result.initial_model_path}")
     print(f"Final model:     {result.final_model_path}")
     print(f"Best model:      {result.best_model_path}")
+    print(f"Best step:       {result.best_step}")
+    print(f"Best score:      {result.best_score_rate:.1%}")
     print(f"Evaluation W/D/L: {result.final_evaluation.wins}/"
           f"{result.final_evaluation.draws}/{result.final_evaluation.losses}")
     print(f"Evaluation score: {result.final_evaluation.score_rate:.1%}")

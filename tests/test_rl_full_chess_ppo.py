@@ -5,6 +5,7 @@ from pathlib import Path
 import chess
 import pytest
 import torch
+import chess_agent.rl.train_full_chess_ppo as training
 from torch import nn
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.utils import is_masking_supported
@@ -19,10 +20,14 @@ from chess_agent.rl.ppo_policy import (
 )
 from chess_agent.rl.train_full_chess_ppo import (
     FullChessPPOConfig,
+    FullChessEvaluationResult,
+    FullChessGameEvaluation,
     TrackedMaskablePPO,
     evaluate_full_chess_ppo,
     make_opponent,
     make_vector_env,
+    resolved_evaluation_config,
+    selection_evaluation_seed,
     train_full_chess_ppo,
     validate_config,
 )
@@ -113,6 +118,8 @@ def test_full_chess_ppo_smoke_training_against_policy_pool(
             opponent_model_paths=(opponent_path,),
             pool_policy_probability=0.5,
             opponent_policy_device="cpu",
+            evaluation_opponent="alpha-random",
+            evaluation_alpha_move_probability=0.5,
             save_path=tmp_path / "pool_final.zip",
             initial_model_path=tmp_path / "pool_initial.zip",
             best_model_path=tmp_path / "pool_best.zip",
@@ -122,6 +129,128 @@ def test_full_chess_ppo_smoke_training_against_policy_pool(
     assert result.completed_timesteps == 2
     assert result.final_evaluation.illegal_actions == 0
     assert isinstance(model, MaskablePPO)
+
+
+def test_evaluation_settings_do_not_change_training_pool(tmp_path: Path) -> None:
+    config = smoke_config(
+        opponent="pool",
+        opponent_model_paths=(tmp_path / "opponent.zip",),
+        pool_policy_probability=0.25,
+        alpha_move_probability=0.25,
+        evaluation_opponent="alpha-random",
+        evaluation_alpha_move_probability=0.5,
+        evaluation_opponent_depth=2,
+        evaluation_opponent_time_limit=0.1,
+        evaluation_seed=110_000,
+    )
+    validate_config(config)
+
+    evaluation = resolved_evaluation_config(config)
+
+    assert config.opponent == "pool"
+    assert config.alpha_move_probability == 0.25
+    assert config.opponent_depth == 1
+    assert config.opponent_model_paths == (tmp_path / "opponent.zip",)
+    assert evaluation.opponent == "alpha-random"
+    assert evaluation.alpha_move_probability == 0.5
+    assert evaluation.opponent_depth == 2
+    assert evaluation.opponent_time_limit == 0.1
+    assert evaluation.opponent_model_paths == ()
+    assert selection_evaluation_seed(config) == 110_000
+
+
+def test_evaluation_defaults_preserve_training_settings(tmp_path: Path) -> None:
+    config = smoke_config(
+        opponent="pool",
+        opponent_model_paths=(tmp_path / "opponent.zip",),
+        seed=7,
+    )
+    assert resolved_evaluation_config(config) == config
+    assert selection_evaluation_seed(config) == 100_007
+
+
+@pytest.mark.parametrize(
+    ("rewards", "patience", "min_delta", "stop_step", "best_step", "best_score"),
+    (
+        ((0, 1, 0, 0, -1), 2, 0.0, 6, 2, 1.0),
+        ((0, -1, 0, -1), 2, 0.0, 4, 0, 0.5),
+        ((-1, 0, -1, 1, 0, 0, -1), 2, 0.0, 10, 6, 1.0),
+        ((-1, 0, 0, 1), 2, 0.5, 4, 0, 0.0),
+    ),
+)
+def test_early_stopping_preserves_best_and_logs_selection_opponent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rewards: tuple[int, ...],
+    patience: int,
+    min_delta: float,
+    stop_step: int,
+    best_step: int,
+    best_score: float,
+) -> None:
+    evaluation_calls: list[dict] = []
+    results = iter(rewards)
+
+    def scripted_evaluation(**kwargs) -> FullChessEvaluationResult:
+        evaluation_calls.append(kwargs)
+        reward = next(results)
+        return FullChessEvaluationResult(
+            games=(FullChessGameEvaluation(
+                episode=1,
+                result={-1: "0-1", 0: "1/2-1/2", 1: "1-0"}[reward],
+                reward=float(reward),
+                plies=2,
+                agent_color="white",
+                termination="max_plies" if reward == 0 else "checkmate",
+                illegal_action=False,
+            ),),
+        )
+
+    monkeypatch.setattr(training, "evaluate_full_chess_ppo", scripted_evaluation)
+    _, result = train_full_chess_ppo(
+        smoke_config(
+            total_timesteps=12,
+            evaluation_every=2,
+            evaluation_opponent="alpha-random",
+            evaluation_alpha_move_probability=0.5,
+            evaluation_opponent_depth=2,
+            evaluation_seed=110_000,
+            early_stopping_patience=patience,
+            early_stopping_min_delta=min_delta,
+            experiment_dir=tmp_path / "experiments",
+            save_path=tmp_path / "final.zip",
+            initial_model_path=tmp_path / "initial.zip",
+            best_model_path=tmp_path / "best.zip",
+        )
+    )
+
+    assert result.stopped_early
+    assert result.completed_timesteps == stop_step
+    assert result.target_timesteps == 12
+    assert result.best_step == best_step
+    assert result.best_score_rate == best_score
+    best_model = TrackedMaskablePPO.load(result.best_model_path, device="cpu")
+    assert best_model.num_timesteps == best_step
+    assert all(call["opponent"] == "alpha-random" for call in evaluation_calls)
+    assert all(call["alpha_move_probability"] == 0.5 for call in evaluation_calls)
+    assert all(call["opponent_depth"] == 2 for call in evaluation_calls)
+    assert [call["seed"] for call in evaluation_calls] == (
+        [110_000] * (len(evaluation_calls) - 1) + [210_000]
+    )
+    run_dir = result.experiment_run_dir
+    assert run_dir is not None
+    with (run_dir / "games.csv").open(encoding="utf-8", newline="") as source:
+        rows = list(csv.DictReader(source))
+    assert all(
+        row["opponent"] == "alpha-random"
+        for row in rows if row["phase"] in {"evaluation", "final_evaluation"}
+    )
+    assert any(row["opponent"] == "random" for row in rows if row["phase"] == "train")
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["summary"]["stopped_early"] is True
+    assert summary["summary"]["best_step"] == best_step
+    events = (run_dir / "events.jsonl").read_text(encoding="utf-8")
+    assert '"event": "early_stopping"' in events
 
 
 def test_policy_value_transfer_preserves_actor_and_critic_outputs() -> None:
@@ -251,6 +380,7 @@ def test_full_chess_ppo_smoke_training_saves_logs_and_models(tmp_path: Path) -> 
     assert result.start_timesteps == 0
     assert result.target_timesteps == 4
     assert result.trained_timesteps == 4
+    assert not result.stopped_early
     assert result.initial_model_path.exists()
     assert result.final_model_path.exists()
     assert result.best_model_path.exists()
@@ -430,6 +560,28 @@ def test_non_policy_opponent_rejects_model_paths(tmp_path: Path) -> None:
 def test_additional_timesteps_requires_resume_checkpoint() -> None:
     with pytest.raises(ValueError, match="requires resume_from"):
         validate_config(smoke_config(additional_timesteps=2))
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    (
+        ({"evaluation_opponent": "pool"}, "evaluation_opponent"),
+        ({"evaluation_alpha_move_probability": 1.1}, "evaluation_alpha"),
+        ({"evaluation_alpha_move_probability": float("nan")}, "evaluation_alpha"),
+        ({"evaluation_opponent_depth": 0}, "evaluation_opponent_depth"),
+        ({"evaluation_opponent_time_limit": 0}, "evaluation_opponent_time_limit"),
+        ({"evaluation_seed": -1}, "evaluation_seed"),
+        ({"early_stopping_patience": -1}, "early_stopping_patience"),
+        ({"early_stopping_min_delta": -0.1}, "early_stopping_min_delta"),
+        ({"early_stopping_min_delta": float("nan")}, "early_stopping_min_delta"),
+        ({"early_stopping_patience": 1}, "requires periodic"),
+        ({"early_stopping_patience": 1, "evaluation_every": 2,
+          "evaluation_games": 0}, "requires periodic"),
+    ),
+)
+def test_invalid_selection_settings_are_rejected(overrides: dict, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        validate_config(smoke_config(**overrides))
 
 
 def test_full_chess_ppo_resume_can_add_stage_timesteps(tmp_path: Path) -> None:

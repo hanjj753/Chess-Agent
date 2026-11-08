@@ -280,6 +280,42 @@ def build_text_report(data: ExperimentData) -> str:
                 f"policy={float(config.get('pool_policy_probability', 0.5)):.1%}, "
                 f"alpha-random={1.0 - float(config.get('pool_policy_probability', 0.5)):.1%}"
             )
+    evaluation_opponent = config.get("evaluation_opponent") or config.get("opponent", "unknown")
+    evaluation_seed = config.get("evaluation_seed")
+    if evaluation_seed is None:
+        evaluation_seed = int(config.get("seed", 0)) + 100_000
+    evaluation_lines = [
+        f"평가 상대:       {evaluation_opponent} (best 선택 기준)",
+        f"평가 seed:       selection={evaluation_seed}, final={evaluation_seed + 100_000}",
+    ]
+    if evaluation_opponent in {"alpha", "alpha-random", "pool"}:
+        evaluation_depth = config.get("evaluation_opponent_depth")
+        if evaluation_depth is None:
+            evaluation_depth = config.get("opponent_depth", 1)
+        evaluation_time = config.get("evaluation_opponent_time_limit")
+        if evaluation_time is None:
+            evaluation_time = config.get("opponent_time_limit")
+        evaluation_probability = config.get("evaluation_alpha_move_probability")
+        if evaluation_probability is None:
+            evaluation_probability = config.get("alpha_move_probability", 0.1)
+        probability = (
+            f", alpha_move_probability={float(evaluation_probability):.1%}"
+            if evaluation_opponent in {"alpha-random", "pool"}
+            else ""
+        )
+        evaluation_lines.append(
+            f"평가 설정:       depth={evaluation_depth}, time_limit={evaluation_time}"
+            f"{probability}"
+        )
+    patience = config.get("early_stopping_patience", 0)
+    evaluation_lines.append(
+        f"조기 종료:       patience={patience or 'off'}, "
+        f"min_delta={float(config.get('early_stopping_min_delta', 0.0)):.1%}"
+    )
+    if "stopped_early" in result_summary:
+        stage_lines.append(
+            f"조기 종료 여부:  {'yes' if result_summary['stopped_early'] else 'no'}"
+        )
     train_games = tuple(game for game in data.games if game.phase == "train")
     train_stats = summarize_games(train_games)
     evaluation_groups = grouped_evaluation_games(data.games)
@@ -350,6 +386,7 @@ def build_text_report(data: ExperimentData) -> str:
         f"목표 timestep:   {format_int(target_step)}",
         f"학습 상대:       {config.get('opponent', 'unknown')}",
         *opponent_lines,
+        *evaluation_lines,
         f"학습률:          {config.get('learning_rate', 'unknown')}",
         f"rollout:         n_envs={config.get('n_envs', '?')} x n_steps={config.get('n_steps', '?')}",
         f"PPO update:      batch={config.get('batch_size', '?')}, epochs={config.get('n_epochs', '?')}",
