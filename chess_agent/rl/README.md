@@ -35,6 +35,8 @@ Gymnasium 환경
 - `initialize_policy_value.py`: tactical CNN checkpoint를 Policy-Value 모델로 변환
 - `value_dataset.py`: full-chess value dataset의 bit-pack NPZ 저장/불러오기
 - `collect_value_dataset.py`: `.pt`/PPO `.zip` policy 대국에서 value train/validation 상태 수집
+- `collect_teacher_dataset.py`: 실제 대국 국면 수집과 Stockfish 추천 수/점수 라벨링
+- `teacher_dataset.py`: history, action mask, 교사 action과 점수를 포함하는 NPZ 형식
 - `pretrain_value_head.py`: policy를 고정한 value head supervised 사전학습
 - `pretrain_ppo_value_head.py`: PPO actor와 공유 CNN을 고정한 critic supervised 사전학습
 - `evaluate_value_head.py`: checkpoint를 지정한 value dataset에서 독립 평가
@@ -1533,6 +1535,107 @@ done
 悪化や同等なら同じ条件の大量再評価を重ねず、学習方式を見直します。
 内部 best 選択と外部成績の差は別問題です。今回の変更は評価基準を揃えるための
 もので、p50 の改善を保証するものではありません。
+
+### 실제 대국 국면에 Stockfish 정답 붙이기
+
+League v2는 선택 평가가 48.0%에서 47.0%, 47.0%, 45.2%로 내려가 24,576 timestep
+추가 후 조기 종료됐습니다. best에는 시작 모델(65,536 step)이 남았습니다. 이제 상대
+비율을 계속 조정하는 대신 실제 대국에서 만난 국면에 좋은 수를 직접 알려주는 데이터를
+준비합니다. **이 스크립트는 수집/라벨링만 하며 policy/value 가중치를 수정하지 않습니다.**
+
+#### 무엇을 수집하는가
+
+1. 기존 champion NN이 alpha-random p50과 대국합니다. Stockfish는 상대가 아니라 교사입니다.
+2. 기본적으로 NN의 분포에서 확률적으로 수를 골라 다양한 국면을 만듭니다. 동일한 가중치지만
+   deterministic 대국 평가와 행동 방식은 다릅니다. `--deterministic-policy`로 바꿀 수 있습니다.
+3. 첫 8 ply는 건너뛰고, 대국 전체의 나머지 agent 차례 중 최대 40개를 균등 무작위 추출합니다.
+4. 각 국면에서 Stockfish 추천 수를 구하고, NN이 실제 선택한 수로 root move를 제한해
+   한 번 더 분석합니다. 두 수가 같으면 점수를 재사용합니다. 샘플당 최대 두 번 탐색합니다.
+5. 대국 단위로 train 90% / validation 10%를 먼저 나눕니다. 정확히 같은 NN 입력이 반복되면
+   하나만 남기며, train과 validation이 겹치면 validation에만 둡니다.
+
+최대 `500 games x 40 positions = 20,000`개이고 짧은 대국/중복 제거 때문에 실제 수는
+줄어듭니다. 같은 보드라도 history가 다르면 서로 다른 입력입니다. 서로 다른 대국에 비슷한
+오프닝이 나타나는 것까지 막는 split은 아니므로 완전히 새로운 오프닝 일반화 평가는 아닙니다.
+
+#### 서버 실행 명령
+
+먼저 새 코드를 받습니다. 기존 환경에 추가로 설치할 패키지는 없습니다.
+
+```bash
+git pull origin main
+```
+
+다음 명령은 champion으로 최대 2만 국면을 수집하고 Stockfish 정답을 붙입니다.
+`--engine stockfish`는 기존 `engines/stockfish` 폴더에서 실행 파일을 찾습니다.
+실행 파일이 여러 개 있는 폴더라면 `--engine /absolute/path/to/stockfish`로 직접 지정합니다.
+
+```bash
+python -m chess_agent.rl.collect_teacher_dataset \
+  --model-path tmp/ppo_value_ab_long_critic_seed0_checkpoints/full_chess_ppo_65536.zip \
+  --output-dir data/teacher/p50_v1 \
+  --engine stockfish --engine-nodes 20000 --engine-threads 1 --engine-hash 128 \
+  --games 500 --positions-per-game 40 --skip-plies 8 \
+  --opponent alpha-random --alpha-move-probability 0.50 --opponent-depth 1 \
+  --max-plies 200 --validation-fraction 0.10 \
+  --seed 410000 --device cuda --log-every 5 \
+  --summary-output analysis/teacher_p50_v1/collection_summary.txt
+```
+
+CUDA는 NN 추론에 사용합니다. 일반 Stockfish 교사와 alpha 상대는 CPU에서 실행됩니다.
+`--engine-nodes 20000`은 탐색 자원 제한이지 Elo 20000 또는 Elo 2000 설정이 아닙니다.
+`--engine-time 0.05` 또는 `--engine-depth 12`로 대체할 수 있지만 세 제한 중 하나만
+지정합니다. 모두 생략하면 0.05초를 사용합니다. 고정 node 수와 1 thread는 시간 제한보다
+탐색량을 일정하게 유지하기 쉽지만, 라벨을 완벽한 체스 정답으로 보장하지는 않습니다.
+
+진행 로그에는 현재 game, 저장한 라벨 수, split, 완료 대국 수가 나옵니다.
+기본값은 첫 대국과 이후 5대국마다 출력하며 `--log-every 1`이면 매 대국 출력합니다.
+
+중단 후에는 **위 명령에 `--resume`만 추가**해 다시 실행합니다. 완료된 대국은 재사용하고,
+진행 중이던 미완료 대국부터 다시 수집/분석합니다. 원본 모델과 엔진의 SHA-256 및 수집
+설정을 검사해서 다른 데이터가 섞이지 않게 합니다. 설정/모델을 바꾸려면 새 output-dir을
+사용합니다. 완료된 데이터에 `--resume`하면 모델/엔진 실행 없이 최종 파일을 다시 조합합니다.
+
+#### 생성 파일과 점수 해석
+
+- `data/teacher/p50_v1/train.npz`, `validation.npz`: 다음 policy 교정 학습에 쓸 데이터.
+- `games/game_*.npz`: 대국별 중간 저장 파일. 재개가 필요하면 지우지 않습니다.
+- `positions.csv`: 각 샘플의 split, game ID, ply, FEN, 실제 수/추천 수, cp/mate 점수와 cp loss.
+- `games.pgn`: 수집한 전체 대국. CSV의 game ID와 PGN의 `GameId`로 연결됩니다.
+- `manifest.json`: 모델/엔진 해시와 수집 설정.
+- `summary.json`, `summary.txt`: 중복 제거 후 split별 개수, 추천 수 일치율, cp loss와 mate 샘플 수.
+- `analysis/teacher_p50_v1/collection_summary.txt`: 공유/해석용 TXT 요약 복사본.
+
+점수는 모두 **수집한 agent(현재 둘 차례) 관점**입니다. 백/흑에 따라 임의로 부호를 다시
+바꾸지 않습니다. `teacher_cp - played_cp`의 음수는 0으로 잘라 cp loss를 구합니다.
+각 탐색은 유한한 예산이므로 제한 수 탐색에서 오히려 더 좋은 점수가 나올 수도 있습니다.
+`negative_raw_cp_differences`에서 이런 샘플 수를 확인할 수 있습니다.
+
+체크메이트 평가는 `teacher_mate` / `played_mate`에 따로 저장합니다. 메이트가 확정된 쪽이면
+양수, 당하는 쪽이면 음수이고, 해당 cp 값은 NPZ에서 NaN(CSV에서 빈칸)입니다. 메이트를
+100000 cp로 바꾸지 않으며, 둘 중 하나라도 mate이면 일반 cp loss 평균에서 제외합니다.
+이 평균은 수집한 국면의 제한 탐색 비교일 뿐, 대국 승률이나 NN의 Elo가 아닙니다.
+`Agreement`는 현재 policy가 Stockfish 추천 수와 정확히 같은 수를 고른 비율입니다.
+낮다고 수집 실패라는 뜻은 아닙니다. 다른 좋은 수도 있을 수 있으므로 cp loss도 함께 봅니다.
+
+#### 다음 학습에서 읽을 형식
+
+```python
+import numpy as np
+from chess_agent.rl.teacher_dataset import load_teacher_dataset
+
+data = load_teacher_dataset("data/teacher/p50_v1/train.npz")
+indices = np.arange(min(32, len(data)))
+observations = data.observations(indices)       # (N, 90, 8, 8), history=4 모델
+masks = data.action_masks(indices)             # (N, 20480)
+targets = data.columns["teacher_actions"][indices]  # (N,), 정답 action ID
+```
+
+최근 history plane은 대국 환경이 실제 NN에 전달했던 배열 그대로 저장합니다. FEN 하나로
+history를 재구성하지 않습니다. 관측과 mask는 bit-pack 압축하지만 불러올 때 원래 shape로
+복원합니다. 먼저 위 TXT 요약으로 데이터가 정상인지 확인한 뒤 policy 지도학습과 별도 대국
+평가를 추가합니다. 기존 value dataset은 최종 승패 기반의 discounted return이므로 이 교사
+action dataset과 같은 형식이 아니며, `pretrain_ppo_value_head`에 그대로 넣으면 안 됩니다.
 
 ## 실험 과정 기록
 
