@@ -23,6 +23,36 @@ engines/
     stockfish-windows-x86-64-avx2.exe
 ```
 
+### Linux에서 실행할 때
+
+Windows용 `.exe`는 Linux에서 직접 실행할 수 없습니다. 실행 권한만 붙이는
+`chmod +x`로 해결되지 않으며 Linux용 바이너리가 필요합니다.
+
+Ubuntu에서는 패키지를 설치하고 실행 파일 경로를 직접 지정할 수 있습니다.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y stockfish
+printf 'uci\nquit\n' | /usr/games/stockfish
+```
+
+마지막 명령이 Stockfish 이름과 `uciok`를 출력하면 UCI 실행이 되는 것입니다.
+교사 데이터 수집에는 `--engine /usr/games/stockfish`를 사용합니다. `play`에서는
+`--white-engine` 또는 `--black-engine`에 같은 절대 경로를 전달합니다.
+
+sudo 권한이 없다면 [공식 다운로드](https://stockfishchess.org/download/)에서
+서버 OS/CPU에 맞는 Linux 버전을 받아 압축을 풀고, 실제 바이너리의 절대 경로를
+사용합니다. **신뢰할 수 있는 Linux 바이너리**에 실행 권한이 빠졌을 때만
+`chmod +x /absolute/path/to/stockfish`를 실행합니다.
+
+폴더를 지정하면 Windows에서는 Windows 실행 파일만, Linux/macOS에서는 Windows
+확장자가 아니며 실행 권한이 있는 파일만 고릅니다. 후보가 여러 개라면 임의로 선택하지
+않고 실제 실행 파일 경로를 요구합니다. 문서나 가중치 파일에 실행 권한을 부여하지 마세요.
+
+실패한 교사 수집 실행에서 이미 `manifest.json`이 만들어졌다면 엔진 변경 후 기존
+폴더로 `--resume`할 수 없습니다. `--output-dir data/teacher/p50_v1_linux`처럼 새
+폴더로 시작하면 기존 파일을 삭제할 필요가 없습니다.
+
 기본 실행:
 
 ```powershell

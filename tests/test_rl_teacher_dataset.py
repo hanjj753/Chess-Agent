@@ -154,6 +154,7 @@ def make_config(tmp_path: Path, **overrides) -> collection.TeacherCollectionConf
     )
     engine = tmp_path / "teacher"
     engine.write_text("test executable", encoding="utf-8")
+    engine.chmod(0o755)
     return collection.TeacherCollectionConfig(**{
         "model_path": model_path, "engine_path": engine,
         "output_dir": tmp_path / "dataset", "games": 4,

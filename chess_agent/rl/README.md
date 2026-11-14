@@ -1568,6 +1568,9 @@ git pull origin main
 
 다음 명령은 champion으로 최대 2만 국면을 수집하고 Stockfish 정답을 붙입니다.
 `--engine stockfish`는 기존 `engines/stockfish` 폴더에서 실행 파일을 찾습니다.
+Windows용 `.exe`를 Linux로 복사해서 사용할 수는 없습니다. Ubuntu에서
+`sudo apt-get install -y stockfish`로 설치했다면 `--engine /usr/games/stockfish`를
+사용합니다. 자세한 설치/실행 확인 방법은 [엔진 문서](../../engines/README.md)를 봅니다.
 실행 파일이 여러 개 있는 폴더라면 `--engine /absolute/path/to/stockfish`로 직접 지정합니다.
 
 ```bash
@@ -1594,7 +1597,9 @@ CUDA는 NN 추론에 사용합니다. 일반 Stockfish 교사와 alpha 상대는
 중단 후에는 **위 명령에 `--resume`만 추가**해 다시 실행합니다. 완료된 대국은 재사용하고,
 진행 중이던 미완료 대국부터 다시 수집/분석합니다. 원본 모델과 엔진의 SHA-256 및 수집
 설정을 검사해서 다른 데이터가 섞이지 않게 합니다. 설정/모델을 바꾸려면 새 output-dir을
-사용합니다. 완료된 데이터에 `--resume`하면 모델/엔진 실행 없이 최종 파일을 다시 조합합니다.
+사용합니다. Windows `.exe` 실행 실패 후 Linux 엔진으로 바꿀 때도
+`--output-dir data/teacher/p50_v1_linux`처럼 새 폴더를 지정합니다. 완료된 데이터에
+`--resume`하면 모델/엔진 실행 없이 최종 파일을 다시 조합합니다.
 
 #### 생성 파일과 점수 해석
 
